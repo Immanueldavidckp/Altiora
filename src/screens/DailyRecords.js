@@ -8,6 +8,7 @@ import { COLORS, BORDER_RADIUS, SPACING, DAILY_VARIANTS } from '../theme/colors'
 import { Card, EmptyState, SectionHeader, Badge } from '../components/Card';
 import { getTodayKey, getRelativeDate, formatDate, formatDateKey } from '../utils/helpers';
 import { addDailyRecord, getDailyRecords, deleteDailyRecord } from '../db/database';
+import { getCurrentLocation } from '../utils/location';
 
 const DailyRecords = () => {
     const [records, setRecords] = useState([]);
@@ -23,6 +24,8 @@ const DailyRecords = () => {
     const [endTime, setEndTime] = useState('');
     const [notes, setNotes] = useState('');
     const [formVariant, setFormVariant] = useState('morning');
+    const [includeLocation, setIncludeLocation] = useState(true);
+    const [locationLoading, setLocationLoading] = useState(false);
 
     const loadData = useCallback(async () => {
         try {
@@ -47,6 +50,12 @@ const DailyRecords = () => {
             return;
         }
         try {
+            setLocationLoading(true);
+            let locationData = null;
+            if (includeLocation) {
+                locationData = await getCurrentLocation();
+            }
+
             await addDailyRecord({
                 date: selectedDate,
                 variant: formVariant,
@@ -55,12 +64,17 @@ const DailyRecords = () => {
                 start_time: startTime.trim(),
                 end_time: endTime.trim(),
                 notes: notes.trim(),
+                latitude: locationData?.latitude,
+                longitude: locationData?.longitude,
+                location_name: locationData?.locationName,
             });
             setShowModal(false);
             resetForm();
             loadData();
         } catch (err) {
             Alert.alert('Error', 'Failed to save record');
+        } finally {
+            setLocationLoading(false);
         }
     };
 
@@ -154,6 +168,12 @@ const DailyRecords = () => {
                                     <Text style={styles.recTask}>{rec.task_description}</Text>
                                     <View style={styles.recMetaRow}>
                                         {rec.start_time ? <Text style={styles.recTime}>{rec.start_time} - {rec.end_time || '...'}</Text> : null}
+                                        {rec.location_name ? (
+                                            <View style={styles.locationTag}>
+                                                <Ionicons name="location" size={12} color={COLORS.accent} />
+                                                <Text style={styles.locationText} numberOfLines={1}>{rec.location_name}</Text>
+                                            </View>
+                                        ) : null}
                                         {rec.notes ? <Text style={styles.recNotes} numberOfLines={1}>{rec.notes}</Text> : null}
                                     </View>
                                 </View>
@@ -252,8 +272,28 @@ const DailyRecords = () => {
                                 multiline
                             />
 
-                            <TouchableOpacity style={styles.submitBtn} onPress={handleSubmit}>
-                                <Text style={styles.submitBtnText}>Save Record</Text>
+                            <TouchableOpacity
+                                style={styles.locationToggle}
+                                onPress={() => setIncludeLocation(!includeLocation)}
+                            >
+                                <Ionicons
+                                    name={includeLocation ? "location" : "location-outline"}
+                                    size={20}
+                                    color={includeLocation ? COLORS.primary : COLORS.textMuted}
+                                />
+                                <Text style={[styles.locationToggleText, includeLocation && { color: COLORS.textPrimary }]}>
+                                    {includeLocation ? "Location will be Tagged" : "Tap to tag location"}
+                                </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                style={[styles.submitBtn, locationLoading && { opacity: 0.7 }]}
+                                onPress={handleSubmit}
+                                disabled={locationLoading}
+                            >
+                                <Text style={styles.submitBtnText}>
+                                    {locationLoading ? "Fetching Location..." : "Save Record"}
+                                </Text>
                             </TouchableOpacity>
                         </ScrollView>
                     </View>
@@ -298,6 +338,8 @@ const styles = StyleSheet.create({
     recTask: { fontSize: 15, fontWeight: '600', color: COLORS.textPrimary },
     recMetaRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 8 },
     recTime: { fontSize: 12, color: COLORS.accent, fontWeight: '600' },
+    locationTag: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.accent + '20', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, gap: 4 },
+    locationText: { fontSize: 11, color: COLORS.accent, fontWeight: '600', maxWidth: 100 },
     recNotes: { fontSize: 12, color: COLORS.textSecondary, flex: 1 },
     recHoursBox: {
         backgroundColor: COLORS.surfaceHighlight, borderRadius: BORDER_RADIUS.sm,
@@ -334,6 +376,11 @@ const styles = StyleSheet.create({
     },
     vpEmoji: { fontSize: 20 },
     vpLabel: { fontSize: 11, fontWeight: '600', color: COLORS.textSecondary, marginTop: 2 },
+    locationToggle: {
+        flexDirection: 'row', alignItems: 'center', marginTop: SPACING.md, gap: 10,
+        backgroundColor: COLORS.surfaceHighlight, padding: SPACING.md, borderRadius: BORDER_RADIUS.md,
+    },
+    locationToggleText: { fontSize: 14, fontWeight: '600', color: COLORS.textSecondary },
     submitBtn: {
         backgroundColor: COLORS.primary, borderRadius: BORDER_RADIUS.md,
         paddingVertical: SPACING.lg, alignItems: 'center', marginTop: SPACING.xxl, marginBottom: SPACING.xxxl,

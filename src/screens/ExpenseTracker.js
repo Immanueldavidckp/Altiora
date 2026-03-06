@@ -8,6 +8,7 @@ import { COLORS, BORDER_RADIUS, SPACING, PAYMENT_METHODS } from '../theme/colors
 import { Card, StatCard, Badge, EmptyState, SectionHeader, Divider } from '../components/Card';
 import { formatCurrency, getTodayKey, getRelativeDate, formatDate, formatDateKey } from '../utils/helpers';
 import { addExpense, getExpenses, getExpenseSummary, deleteExpense } from '../db/database';
+import { getCurrentLocation } from '../utils/location';
 
 const ExpenseTracker = () => {
     const [expenses, setExpenses] = useState([]);
@@ -24,6 +25,8 @@ const ExpenseTracker = () => {
     const [category, setCategory] = useState('');
     const [selectedMethod, setSelectedMethod] = useState(PAYMENT_METHODS[0].id);
     const [expenseType, setExpenseType] = useState('expense');
+    const [includeLocation, setIncludeLocation] = useState(true);
+    const [locationLoading, setLocationLoading] = useState(false);
 
     const loadData = useCallback(async () => {
         try {
@@ -59,6 +62,12 @@ const ExpenseTracker = () => {
             return;
         }
         try {
+            setLocationLoading(true);
+            let locationData = null;
+            if (includeLocation) {
+                locationData = await getCurrentLocation();
+            }
+
             await addExpense({
                 amount: parseFloat(amount),
                 description: description.trim(),
@@ -66,12 +75,17 @@ const ExpenseTracker = () => {
                 payment_method: selectedMethod,
                 type: expenseType,
                 date: selectedDate,
+                latitude: locationData?.latitude,
+                longitude: locationData?.longitude,
+                location_name: locationData?.locationName,
             });
             setShowModal(false);
             resetForm();
             loadData();
         } catch (err) {
             Alert.alert('Error', 'Failed to save expense');
+        } finally {
+            setLocationLoading(false);
         }
     };
 
@@ -156,6 +170,12 @@ const ExpenseTracker = () => {
                                         <View style={styles.expMeta}>
                                             <Badge label={method.label} color={method.color} />
                                             {exp.category ? <Text style={styles.expCat}>{exp.category}</Text> : null}
+                                            {exp.location_name && (
+                                                <View style={styles.locationTag}>
+                                                    <Ionicons name="location" size={10} color={COLORS.textSecondary} />
+                                                    <Text style={styles.locationText} numberOfLines={1}>{exp.location_name}</Text>
+                                                </View>
+                                            )}
                                         </View>
                                     </View>
                                     <Text style={[styles.expAmount, { color: exp.type === 'income' ? COLORS.accentGreen : COLORS.accentRed }]}>
@@ -252,9 +272,30 @@ const ExpenseTracker = () => {
                                 ))}
                             </View>
 
+                            <TouchableOpacity
+                                style={styles.locationToggle}
+                                onPress={() => setIncludeLocation(!includeLocation)}
+                            >
+                                <Ionicons
+                                    name={includeLocation ? "location" : "location-outline"}
+                                    size={20}
+                                    color={includeLocation ? COLORS.primary : COLORS.textMuted}
+                                />
+                                <Text style={[styles.locationToggleText, includeLocation && { color: COLORS.textPrimary }]}>
+                                    {includeLocation ? "Tag current location" : "Location tagging off"}
+                                </Text>
+                            </TouchableOpacity>
+
                             {/* Submit */}
-                            <TouchableOpacity style={styles.submitBtn} onPress={handleSubmit} activeOpacity={0.8}>
-                                <Text style={styles.submitBtnText}>Save Transaction</Text>
+                            <TouchableOpacity
+                                style={[styles.submitBtn, locationLoading && { opacity: 0.7 }]}
+                                onPress={handleSubmit}
+                                activeOpacity={0.8}
+                                disabled={locationLoading}
+                            >
+                                <Text style={styles.submitBtnText}>
+                                    {locationLoading ? "Fetching Location..." : "Save Transaction"}
+                                </Text>
                             </TouchableOpacity>
                         </ScrollView>
                     </View>
@@ -289,6 +330,8 @@ const styles = StyleSheet.create({
     expDesc: { fontSize: 15, fontWeight: '600', color: COLORS.textPrimary },
     expMeta: { flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 8 },
     expCat: { fontSize: 12, color: COLORS.textSecondary },
+    locationTag: { flexDirection: 'row', alignItems: 'center', gap: 2, marginLeft: 4 },
+    locationText: { fontSize: 10, color: COLORS.textMuted, maxWidth: 80 },
     expAmount: { fontSize: 16, fontWeight: '800' },
     fab: {
         position: 'absolute', bottom: 24, right: 20, width: 56, height: 56,
@@ -332,6 +375,11 @@ const styles = StyleSheet.create({
     },
     chipDot: { width: 8, height: 8, borderRadius: 4, marginRight: 6 },
     chipText: { fontSize: 12, fontWeight: '600', color: COLORS.textSecondary },
+    locationToggle: {
+        flexDirection: 'row', alignItems: 'center', marginTop: SPACING.lg, gap: 10,
+        backgroundColor: COLORS.surfaceHighlight, padding: SPACING.md, borderRadius: BORDER_RADIUS.md,
+    },
+    locationToggleText: { fontSize: 14, fontWeight: '600', color: COLORS.textSecondary },
     submitBtn: {
         backgroundColor: COLORS.primary, borderRadius: BORDER_RADIUS.md,
         paddingVertical: SPACING.lg, alignItems: 'center', marginTop: SPACING.xxl, marginBottom: SPACING.xxxl,

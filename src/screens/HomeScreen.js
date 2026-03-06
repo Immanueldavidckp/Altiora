@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, BORDER_RADIUS, SPACING } from '../theme/colors';
 import { Card, StatCard, SectionHeader } from '../components/Card';
 import { formatCurrency, getTodayKey } from '../utils/helpers';
-import { getExpenses, getExpenseSummary, getDailyRecords, getTrades, getHabitChecks } from '../db/database';
+import { getExpenses, getExpenseSummary, getDailyRecords, getTrades, getHabitChecks, getAppUsage } from '../db/database';
 
 const HomeScreen = ({ navigation }) => {
     const [refreshing, setRefreshing] = useState(false);
@@ -14,6 +14,7 @@ const HomeScreen = ({ navigation }) => {
     const [tradePnL, setTradePnL] = useState(0);
     const [habitsCompleted, setHabitsCompleted] = useState(0);
     const [habitsTotal, setHabitsTotal] = useState(0);
+    const [screenTime, setScreenTime] = useState(0);
 
     const loadDashboard = useCallback(async () => {
         const today = getTodayKey();
@@ -33,6 +34,9 @@ const HomeScreen = ({ navigation }) => {
             const habits = await getHabitChecks(today);
             setHabitsTotal(habits.length);
             setHabitsCompleted(habits.filter(h => h.is_checked).length);
+
+            const usage = await getAppUsage(today);
+            setScreenTime(usage.reduce((s, u) => s + (u.hours_used || 0), 0));
         } catch (e) { console.error(e); }
     }, []);
 
@@ -52,6 +56,7 @@ const HomeScreen = ({ navigation }) => {
         { title: 'Daily Log', emoji: '📋', screen: 'Daily', color: COLORS.accent },
         { title: 'Trading', emoji: '📈', screen: 'Trading', color: COLORS.accentGreen },
         { title: 'Habits', emoji: '✅', screen: 'Habits', color: COLORS.accentOrange },
+        { title: 'App Usage', emoji: '📱', screen: 'Usage', color: COLORS.primary },
     ];
 
     return (
@@ -86,7 +91,10 @@ const HomeScreen = ({ navigation }) => {
             </View>
             <View style={s.statsRow}>
                 <StatCard title="Productive" value={`${productiveHours.toFixed(1)}h`} color={COLORS.accent} />
-                <StatCard title="Trade P&L" value={formatCurrency(tradePnL)} color={tradePnL >= 0 ? COLORS.accentGreen : COLORS.accentRed} />
+                <StatCard title="Screen Time" value={`${screenTime.toFixed(1)}h`} color={COLORS.primary} />
+            </View>
+            <View style={s.statsRow}>
+                <StatCard title="Trade P&L" value={formatCurrency(tradePnL)} color={tradePnL >= 0 ? COLORS.accentGreen : COLORS.accentRed} fullWidth />
             </View>
 
             {/* Habits Progress */}
@@ -115,8 +123,8 @@ const s = StyleSheet.create({
     date: { fontSize: 14, color: COLORS.textSecondary, marginTop: 4, fontWeight: '500' },
     avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.primary, justifyContent: 'center', alignItems: 'center' },
     avatarText: { fontSize: 16, fontWeight: '800', color: '#FFF' },
-    quickActions: { flexDirection: 'row', marginBottom: SPACING.lg, gap: 10 },
-    quickAction: { flex: 1, backgroundColor: COLORS.surface, borderRadius: BORDER_RADIUS.lg, paddingVertical: SPACING.lg, alignItems: 'center', borderWidth: 1, borderColor: COLORS.border },
+    quickActions: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: SPACING.md, gap: 8 },
+    quickAction: { width: '18.4%', backgroundColor: COLORS.surface, borderRadius: BORDER_RADIUS.md, paddingVertical: SPACING.lg, alignItems: 'center', borderWidth: 1, borderColor: COLORS.border },
     qaIcon: { width: 44, height: 44, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginBottom: 6 },
     qaEmoji: { fontSize: 22 },
     qaTitle: { fontSize: 11, fontWeight: '700', color: COLORS.textSecondary },

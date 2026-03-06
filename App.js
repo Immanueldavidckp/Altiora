@@ -10,6 +10,7 @@ import ExpenseTracker from './src/screens/ExpenseTracker';
 import DailyRecords from './src/screens/DailyRecords';
 import TradingTracker from './src/screens/TradingTracker';
 import HabitTracker from './src/screens/HabitTracker';
+import AppUsageTracker from './src/screens/AppUsageTracker';
 import { getDatabase } from './src/db/database';
 
 const COLORS = {
@@ -31,6 +32,7 @@ const getTabIcon = (routeName, focused) => {
     Daily: focused ? 'document-text' : 'document-text-outline',
     Trading: focused ? 'trending-up' : 'trending-up-outline',
     Habits: focused ? 'checkmark-circle' : 'checkmark-circle-outline',
+    Usage: focused ? 'phone-portrait' : 'phone-portrait-outline',
   };
   return icons[routeName] || 'ellipse';
 };
@@ -104,6 +106,7 @@ export default function App() {
         <Tab.Screen name="Daily" component={DailyRecords} options={{ title: '📋 Daily' }} />
         <Tab.Screen name="Trading" component={TradingTracker} options={{ title: '📈 Trading' }} />
         <Tab.Screen name="Habits" component={HabitTracker} options={{ title: '✅ Habits' }} />
+        <Tab.Screen name="Usage" component={AppUsageTracker} options={{ title: '📱 Apps' }} />
       </Tab.Navigator>
     </NavigationContainer>
   );

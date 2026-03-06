@@ -22,6 +22,9 @@ const initializeDatabase = async (database) => {
       payment_method TEXT NOT NULL,
       type TEXT DEFAULT 'expense',
       date TEXT NOT NULL,
+      latitude REAL,
+      longitude REAL,
+      location_name TEXT,
       created_at TEXT DEFAULT (datetime('now','localtime'))
     );
 
@@ -34,6 +37,9 @@ const initializeDatabase = async (database) => {
       start_time TEXT,
       end_time TEXT,
       notes TEXT,
+      latitude REAL,
+      longitude REAL,
+      location_name TEXT,
       created_at TEXT DEFAULT (datetime('now','localtime'))
     );
 
@@ -85,8 +91,18 @@ const initializeDatabase = async (database) => {
 export const addExpense = async (expense) => {
     const db = await getDatabase();
     const result = await db.runAsync(
-        'INSERT INTO expenses (amount, description, category, payment_method, type, date) VALUES (?, ?, ?, ?, ?, ?)',
-        [expense.amount, expense.description, expense.category, expense.payment_method, expense.type || 'expense', expense.date]
+        'INSERT INTO expenses (amount, description, category, payment_method, type, date, latitude, longitude, location_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+            expense.amount,
+            expense.description,
+            expense.category,
+            expense.payment_method,
+            expense.type || 'expense',
+            expense.date,
+            expense.latitude || null,
+            expense.longitude || null,
+            expense.location_name || null
+        ]
     );
     return result.lastInsertRowId;
 };
@@ -119,8 +135,19 @@ export const deleteExpense = async (id) => {
 export const addDailyRecord = async (record) => {
     const db = await getDatabase();
     const result = await db.runAsync(
-        'INSERT INTO daily_records (date, variant, task_description, hours_spent, start_time, end_time, notes) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [record.date, record.variant, record.task_description, record.hours_spent, record.start_time, record.end_time, record.notes]
+        'INSERT INTO daily_records (date, variant, task_description, hours_spent, start_time, end_time, notes, latitude, longitude, location_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+            record.date,
+            record.variant,
+            record.task_description,
+            record.hours_spent,
+            record.start_time,
+            record.end_time,
+            record.notes,
+            record.latitude || null,
+            record.longitude || null,
+            record.location_name || null
+        ]
     );
     return result.lastInsertRowId;
 };

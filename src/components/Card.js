@@ -11,8 +11,8 @@ export const Card = ({ children, style, onPress }) => {
     );
 };
 
-export const StatCard = ({ title, value, subtitle, color, icon }) => (
-    <View style={[styles.statCard, { borderLeftColor: color || COLORS.primary }]}>
+export const StatCard = ({ title, value, subtitle, color, fullWidth }) => (
+    <View style={[styles.statCard, { borderLeftColor: color || COLORS.primary }, fullWidth && { flex: 0, width: '100%', marginHorizontal: 0 }]}>
         <Text style={styles.statTitle}>{title}</Text>
         <Text style={[styles.statValue, { color: color || COLORS.primary }]}>{value}</Text>
         {subtitle && <Text style={styles.statSubtitle}>{subtitle}</Text>}
