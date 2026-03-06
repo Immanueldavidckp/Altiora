@@ -39,3 +39,7 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Allow the releases folder even if it contains large files
+!/releases/
+!/releases/*.apk
