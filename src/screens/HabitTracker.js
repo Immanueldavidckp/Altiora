@@ -1,144 +1,264 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Modal, Alert, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl, Modal, TextInput, Switch, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, BORDER_RADIUS, SPACING, HABIT_CATEGORIES } from '../theme/colors';
-import { Card, EmptyState, SectionHeader } from '../components/Card';
+import { COLORS, SPACING, BORDER_RADIUS } from '../theme/colors';
 import { getTodayKey, getRelativeDate, formatDate, formatDateKey } from '../utils/helpers';
-import { addHabit, getHabitChecks, toggleHabitCheck, deleteHabit } from '../db/database';
+import { getAdvHabits, getAdvHabitChecks, toggleAdvHabit, addAdvHabit, deleteAdvHabit } from '../db/database';
+
+const isHabitVisible = (habit, dateStr) => {
+    if (habit.from_date && dateStr < habit.from_date) return false;
+    if (habit.to_date && dateStr > habit.to_date) return false;
+    if (habit.repeat_type === 'Everyday') return true;
+    if (habit.repeat_type === 'Once') return (!habit.from_date) || (habit.from_date === dateStr);
+    
+    const targetDate = new Date(dateStr);
+    if (!habit.from_date) return true;
+    const startDate = new Date(habit.from_date);
+
+    if (habit.repeat_type === 'Weekly') return targetDate.getDay() === startDate.getDay();
+    if (habit.repeat_type === 'Monthly') return targetDate.getDate() === startDate.getDate();
+    if (habit.repeat_type === 'Yearly') return targetDate.getDate() === startDate.getDate() && targetDate.getMonth() === startDate.getMonth();
+    
+    return true;
+};
+
+const PRIORITY_OPTS = [
+    { value: 1, label: 'Must do in time (Priority 1)' },
+    { value: 2, label: 'Must do within the day' },
+    { value: 3, label: 'Optional' }
+];
+
+const REPEAT_OPTS = ['Everyday', 'Weekly', 'Monthly', 'Yearly', 'Once'];
+
+const Cell = React.memo(({ hour, slot, habit, onPressEmpty, onToggle, onLongPress }) => {
+    if (!habit) {
+        return (
+            <TouchableOpacity
+                activeOpacity={1}
+                onPress={() => onPressEmpty(hour, slot)}
+                style={s.emptyCell}
+            />
+        );
+    }
+
+    const { is_checked, priority } = habit;
+    let pColor = COLORS.borderLight;
+    if (priority === 1) pColor = COLORS.accentRed;
+    if (priority === 2) pColor = COLORS.accentOrange;
+
+    return (
+        <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() => onToggle(habit.id)}
+            onLongPress={() => onLongPress(habit)}
+            delayLongPress={400}
+            style={[s.habitCell, !is_checked && { borderColor: pColor }, is_checked && s.habitCellChecked]}
+        >
+            {is_checked ? <Ionicons name="checkmark" size={16} color="#FFF" /> : null}
+        </TouchableOpacity>
+    );
+}, (prev, next) => prev.habit === next.habit && prev.hour === next.hour);
 
 const HabitTracker = () => {
-    const [habits, setHabits] = useState([]);
-    const [showModal, setShowModal] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
     const [selectedDate, setSelectedDate] = useState(getTodayKey());
-    const [habitName, setHabitName] = useState('');
-    const [habitCategory, setHabitCategory] = useState('morning');
-    const [scheduledTime, setScheduledTime] = useState('');
+    
+    const [habitsMap, setHabitsMap] = useState({});
+    
+    // Modal State
+    const [modalVisible, setModalVisible] = useState(false);
+    const [modalSlot, setModalSlot] = useState({ hour: 0, slot: 0 });
+    const [form, setForm] = useState({
+        name: '', startTime: '', endTime: '', hasNotification: false, 
+        priority: 1, fromDate: getTodayKey(), toDate: '', repeatType: 'Everyday'
+    });
 
     const loadData = useCallback(async () => {
-        try { const data = await getHabitChecks(selectedDate); setHabits(data); } catch (e) { console.error(e); }
+        try {
+            const allHabits = await getAdvHabits();
+            const checks = await getAdvHabitChecks(selectedDate);
+            const checksMap = {};
+            checks.forEach(c => checksMap[c.habit_id] = c.is_checked);
+
+            const map = {};
+            allHabits.forEach(h => {
+                if (isHabitVisible(h, selectedDate)) {
+                    const key = `${h.hour_slot}:${h.slot_index}`;
+                    map[key] = { ...h, is_checked: !!checksMap[h.id] };
+                }
+            });
+            setHabitsMap(map);
+        } catch (e) { console.error(e); }
     }, [selectedDate]);
 
     useEffect(() => { loadData(); }, [loadData]);
-    const onRefresh = async () => { setRefreshing(true); await loadData(); setRefreshing(false); };
 
     const handleToggle = async (habitId) => {
-        const now = new Date();
-        const checkTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-        try { await toggleHabitCheck(habitId, selectedDate, checkTime); loadData(); } catch (e) { console.error(e); }
-    };
-
-    const handleSubmit = async () => {
-        if (!habitName.trim()) { Alert.alert('Error', 'Enter habit name'); return; }
         try {
-            await addHabit({ name: habitName.trim(), category: habitCategory, scheduled_time: scheduledTime.trim() || null });
-            setShowModal(false); setHabitName(''); setScheduledTime(''); loadData();
-        } catch (e) { Alert.alert('Error', 'Failed to save'); }
+            await toggleAdvHabit(habitId, selectedDate);
+            loadData();
+        } catch (e) { console.error(e); }
     };
 
-    const handleDeleteHabit = (id, name) => {
-        Alert.alert('Delete Habit', `Delete "${name}" permanently?`, [
+    const handleLongPress = (habit) => {
+        let msg = `${habit.start_time || 'N/A'} - ${habit.end_time || 'N/A'}\nPriority: ${habit.priority}`;
+        Alert.alert(habit.name, msg, [
             { text: 'Cancel', style: 'cancel' },
-            { text: 'Delete', style: 'destructive', onPress: async () => { await deleteHabit(id); loadData(); } }
+            { text: 'Delete Habit', style: 'destructive', onPress: async () => {
+                await deleteAdvHabit(habit.id);
+                loadData();
+            }}
         ]);
     };
 
-    const navigateDate = (o) => { const d = new Date(selectedDate); d.setDate(d.getDate() + o); setSelectedDate(formatDateKey(d)); };
+    const handlePressEmpty = (hour, slot) => {
+        setModalSlot({ hour, slot });
+        setForm({
+            name: '', startTime: `${String(hour).padStart(2, '0')}:00`, endTime: '', 
+            hasNotification: false, priority: 1, fromDate: getTodayKey(), toDate: '', repeatType: 'Everyday'
+        });
+        setModalVisible(true);
+    };
 
-    const grouped = HABIT_CATEGORIES.map(c => ({
-        ...c, habits: habits.filter(h => h.category === c.id)
-    }));
+    const submitHabit = async () => {
+        if (!form.name.trim()) return Alert.alert('Error', 'Please enter habit name');
+        try {
+            await addAdvHabit({
+                name: form.name.trim(),
+                start_time: form.startTime.trim() || null,
+                end_time: form.endTime.trim() || null,
+                hour_slot: modalSlot.hour,
+                slot_index: modalSlot.slot,
+                has_notification: form.hasNotification,
+                priority: form.priority,
+                from_date: form.fromDate.trim() || null,
+                to_date: form.toDate.trim() || null,
+                repeat_type: form.repeatType
+            });
+            setModalVisible(false);
+            loadData();
+        } catch (e) { console.error(e); Alert.alert('Error saving habit'); }
+    };
 
-    const checkedCount = habits.filter(h => h.is_checked).length;
-    const totalCount = habits.length;
-    const completionRate = totalCount > 0 ? Math.round((checkedCount / totalCount) * 100) : 0;
+    const navigateDate = (o) => {
+        const d = new Date(selectedDate);
+        d.setDate(d.getDate() + o);
+        setSelectedDate(formatDateKey(d));
+    };
+
+    const onRefresh = async () => {
+        setRefreshing(true);
+        await loadData();
+        setRefreshing(false);
+    };
 
     return (
         <View style={s.container}>
             <View style={s.dateSelector}>
-                <TouchableOpacity onPress={() => navigateDate(-1)} style={s.dateArrow}><Ionicons name="chevron-back" size={22} color={COLORS.textPrimary} /></TouchableOpacity>
+                <TouchableOpacity onPress={() => navigateDate(-1)} style={s.dateArrow}>
+                    <Ionicons name="chevron-back" size={22} color={COLORS.textPrimary} />
+                </TouchableOpacity>
                 <TouchableOpacity onPress={() => setSelectedDate(getTodayKey())}>
                     <Text style={s.dateText}>{getRelativeDate(selectedDate)}</Text>
                     <Text style={s.dateSubText}>{formatDate(selectedDate)}</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={() => navigateDate(1)} style={s.dateArrow}><Ionicons name="chevron-forward" size={22} color={COLORS.textPrimary} /></TouchableOpacity>
+                <TouchableOpacity onPress={() => navigateDate(1)} style={s.dateArrow}>
+                    <Ionicons name="chevron-forward" size={22} color={COLORS.textPrimary} />
+                </TouchableOpacity>
             </View>
 
-            {/* Progress Ring */}
-            <View style={s.progressCard}>
-                <View style={s.progressCircle}>
-                    <Text style={s.progressPercent}>{completionRate}%</Text>
-                    <Text style={s.progressLabel}>Done</Text>
-                </View>
-                <View style={s.progressInfo}>
-                    <Text style={s.progressTitle}>Daily Habits</Text>
-                    <Text style={s.progressSub}>{checkedCount} of {totalCount} completed</Text>
-                    <View style={s.progressBarBg}>
-                        <View style={[s.progressBarFill, { width: `${completionRate}%` }]} />
-                    </View>
-                </View>
-            </View>
-
-            <ScrollView style={s.list} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}>
-                {totalCount === 0 ? <EmptyState title="No habits set" subtitle="Tap + to create your first habit" emoji="✅" /> :
-                    grouped.map(group => {
-                        if (group.habits.length === 0) return null;
-                        return (
-                            <View key={group.id}>
-                                <SectionHeader title={`${group.emoji} ${group.label}`} rightText={`${group.habits.filter(h => h.is_checked).length}/${group.habits.length}`} />
-                                {group.habits.map(habit => {
-                                    const isLate = habit.delay_minutes > 0;
+            <ScrollView 
+                style={s.scrollContainer} 
+                contentContainerStyle={s.scrollContent}
+                refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
+                showsVerticalScrollIndicator={false}
+            >
+                <View style={s.gridContainer}>
+                    {Array.from({ length: 24 }).map((_, h) => (
+                        <View key={`hour_${h}`} style={s.row}>
+                            <Text style={s.hourLabel}>{String(h).padStart(2, '0')}:00</Text>
+                            <View style={s.slotsContainer}>
+                                {Array.from({ length: 5 }).map((_, slot) => {
+                                    const key = `${h}:${slot}`;
+                                    const habit = habitsMap[key];
                                     return (
-                                        <Card key={habit.id}>
-                                            <View style={s.habitRow}>
-                                                <TouchableOpacity onPress={() => handleToggle(habit.id)} style={[s.checkbox, habit.is_checked && { backgroundColor: group.color, borderColor: group.color }]}>
-                                                    {habit.is_checked && <Ionicons name="checkmark" size={16} color="#FFF" />}
-                                                </TouchableOpacity>
-                                                <View style={s.habitInfo}>
-                                                    <Text style={[s.habitName, habit.is_checked && s.habitChecked]}>{habit.name}</Text>
-                                                    <View style={s.habitMeta}>
-                                                        {habit.scheduled_time && <Text style={s.habitTime}>⏰ {habit.scheduled_time}</Text>}
-                                                        {habit.is_checked && habit.check_time && <Text style={s.checkTime}>✓ {habit.check_time}</Text>}
-                                                        {habit.is_checked && isLate && <Text style={s.lateText}>⚠ {habit.delay_minutes}min late</Text>}
-                                                    </View>
-                                                </View>
-                                                <TouchableOpacity onPress={() => handleDeleteHabit(habit.id, habit.name)} style={s.deleteBtn}>
-                                                    <Ionicons name="trash-outline" size={18} color={COLORS.textMuted} />
-                                                </TouchableOpacity>
-                                            </View>
-                                        </Card>
+                                        <Cell
+                                            key={key}
+                                            hour={h}
+                                            slot={slot}
+                                            habit={habit}
+                                            onPressEmpty={handlePressEmpty}
+                                            onToggle={handleToggle}
+                                            onLongPress={handleLongPress}
+                                        />
                                     );
                                 })}
                             </View>
-                        );
-                    })
-                }
-                <View style={{ height: 100 }} />
+                        </View>
+                    ))}
+                </View>
             </ScrollView>
 
-            <TouchableOpacity style={s.fab} onPress={() => setShowModal(true)}><Ionicons name="add" size={28} color="#FFF" /></TouchableOpacity>
-
-            <Modal visible={showModal} animationType="slide" transparent>
+            <Modal visible={modalVisible} animationType="slide" transparent>
                 <View style={s.modalOverlay}>
                     <View style={s.modalContent}>
                         <View style={s.modalHeader}>
-                            <Text style={s.modalTitle}>Add Habit</Text>
-                            <TouchableOpacity onPress={() => { setShowModal(false); setHabitName(''); setScheduledTime(''); }}><Ionicons name="close-circle" size={28} color={COLORS.textSecondary} /></TouchableOpacity>
+                            <Text style={s.modalTitle}>Add Habit at {String(modalSlot.hour).padStart(2,'0')}:00</Text>
+                            <TouchableOpacity onPress={() => setModalVisible(false)}>
+                                <Ionicons name="close-circle" size={28} color={COLORS.textSecondary} />
+                            </TouchableOpacity>
                         </View>
                         <ScrollView showsVerticalScrollIndicator={false}>
-                            <Text style={s.inputLabel}>Habit Name *</Text>
-                            <TextInput style={s.input} value={habitName} onChangeText={setHabitName} placeholder="e.g., Meditation, Exercise" placeholderTextColor={COLORS.textMuted} />
-                            <Text style={s.inputLabel}>Category</Text>
-                            <View style={s.catPicker}>
-                                {HABIT_CATEGORIES.map(c => (
-                                    <TouchableOpacity key={c.id} style={[s.catItem, habitCategory === c.id && { backgroundColor: c.color + '25', borderColor: c.color }]} onPress={() => setHabitCategory(c.id)}>
-                                        <Text style={s.catEmoji}>{c.emoji}</Text><Text style={[s.catLabel, habitCategory === c.id && { color: c.color }]}>{c.label}</Text>
+                            <Text style={s.inputLabel}>Activity Name</Text>
+                            <TextInput style={s.input} value={form.name} onChangeText={v => setForm({...form, name: v})} placeholder="e.g. Read Book" placeholderTextColor={COLORS.textMuted} />
+                            
+                            <View style={s.hStack}>
+                                <View style={{flex: 1, marginRight: 8}}>
+                                    <Text style={s.inputLabel}>Start Time</Text>
+                                    <TextInput style={s.input} value={form.startTime} onChangeText={v => setForm({...form, startTime: v})} placeholder="HH:MM" placeholderTextColor={COLORS.textMuted} />
+                                </View>
+                                <View style={{flex: 1, marginLeft: 8}}>
+                                    <Text style={s.inputLabel}>End Time</Text>
+                                    <TextInput style={s.input} value={form.endTime} onChangeText={v => setForm({...form, endTime: v})} placeholder="HH:MM" placeholderTextColor={COLORS.textMuted} />
+                                </View>
+                            </View>
+
+                            <Text style={s.inputLabel}>Priority</Text>
+                            {PRIORITY_OPTS.map(p => (
+                                <TouchableOpacity key={p.value} style={[s.radioItem, form.priority === p.value && s.radioSelected]} onPress={() => setForm({...form, priority: p.value})}>
+                                    <Text style={form.priority === p.value ? {color: COLORS.primary, fontWeight: '700'} : {color: COLORS.textSecondary}}>{p.label}</Text>
+                                </TouchableOpacity>
+                            ))}
+
+                            <Text style={s.inputLabel}>Repeat Frequency</Text>
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{paddingBottom: 8}}>
+                                {REPEAT_OPTS.map(r => (
+                                    <TouchableOpacity key={r} style={[s.pill, form.repeatType === r && s.pillSelected]} onPress={() => setForm({...form, repeatType: r})}>
+                                        <Text style={form.repeatType === r ? {color: '#FFF', fontWeight: 'bold'} : {color: COLORS.textSecondary}}>{r}</Text>
                                     </TouchableOpacity>
                                 ))}
+                            </ScrollView>
+
+                            <View style={s.hStack}>
+                                <View style={{flex: 1, marginRight: 8}}>
+                                    <Text style={s.inputLabel}>From Date</Text>
+                                    <TextInput style={s.input} value={form.fromDate} onChangeText={v => setForm({...form, fromDate: v})} placeholder="YYYY-MM-DD" placeholderTextColor={COLORS.textMuted} />
+                                </View>
+                                <View style={{flex: 1, marginLeft: 8}}>
+                                    <Text style={s.inputLabel}>To Date</Text>
+                                    <TextInput style={s.input} value={form.toDate} onChangeText={v => setForm({...form, toDate: v})} placeholder="Optional" placeholderTextColor={COLORS.textMuted} />
+                                </View>
                             </View>
-                            <Text style={s.inputLabel}>Scheduled Time (optional)</Text>
-                            <TextInput style={s.input} value={scheduledTime} onChangeText={setScheduledTime} placeholder="e.g., 06:30" placeholderTextColor={COLORS.textMuted} />
-                            <TouchableOpacity style={s.submitBtn} onPress={handleSubmit}><Text style={s.submitBtnText}>Save Habit</Text></TouchableOpacity>
+
+                            <View style={[s.hStack, {marginTop: SPACING.lg, marginBottom: SPACING.xl, alignItems: 'center'}]}>
+                                <Text style={[s.inputLabel, {marginTop: 0, flex: 1}]}>Enable Notifications</Text>
+                                <Switch value={form.hasNotification} onValueChange={v => setForm({...form, hasNotification: v})} trackColor={{ false: COLORS.borderLight, true: COLORS.primary }} />
+                            </View>
+
+                            <TouchableOpacity style={s.submitBtn} onPress={submitHabit}>
+                                <Text style={s.submitBtnText}>Create Habit</Text>
+                            </TouchableOpacity>
+                            <View style={{height: 100}}/>
                         </ScrollView>
                     </View>
                 </View>
@@ -148,36 +268,34 @@ const HabitTracker = () => {
 };
 
 const s = StyleSheet.create({
-    container: { flex: 1, backgroundColor: COLORS.background, paddingHorizontal: SPACING.lg },
-    dateSelector: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: SPACING.md, marginBottom: SPACING.sm },
-    dateArrow: { padding: SPACING.sm }, dateText: { fontSize: 20, fontWeight: '800', color: COLORS.textPrimary, textAlign: 'center' },
-    dateSubText: { fontSize: 12, color: COLORS.textSecondary, textAlign: 'center', marginTop: 2 },
-    progressCard: { flexDirection: 'row', backgroundColor: COLORS.surface, borderRadius: BORDER_RADIUS.lg, padding: SPACING.xl, marginBottom: SPACING.md, borderWidth: 1, borderColor: COLORS.border, alignItems: 'center' },
-    progressCircle: { width: 70, height: 70, borderRadius: 35, borderWidth: 4, borderColor: COLORS.accentGreen, justifyContent: 'center', alignItems: 'center', marginRight: SPACING.lg },
-    progressPercent: { fontSize: 18, fontWeight: '900', color: COLORS.accentGreen }, progressLabel: { fontSize: 10, color: COLORS.textMuted, fontWeight: '600' },
-    progressInfo: { flex: 1 }, progressTitle: { fontSize: 18, fontWeight: '700', color: COLORS.textPrimary },
-    progressSub: { fontSize: 13, color: COLORS.textSecondary, marginTop: 2 },
-    progressBarBg: { height: 6, backgroundColor: COLORS.surfaceHighlight, borderRadius: 3, marginTop: 8, overflow: 'hidden' },
-    progressBarFill: { height: '100%', backgroundColor: COLORS.accentGreen, borderRadius: 3 },
-    list: { flex: 1 },
-    habitRow: { flexDirection: 'row', alignItems: 'center' },
-    checkbox: { width: 28, height: 28, borderRadius: 8, borderWidth: 2, borderColor: COLORS.borderLight, justifyContent: 'center', alignItems: 'center', marginRight: SPACING.md },
-    habitInfo: { flex: 1 }, habitName: { fontSize: 15, fontWeight: '600', color: COLORS.textPrimary },
-    habitChecked: { textDecorationLine: 'line-through', color: COLORS.textMuted },
-    habitMeta: { flexDirection: 'row', gap: 8, marginTop: 4, flexWrap: 'wrap' },
-    habitTime: { fontSize: 11, color: COLORS.accent, fontWeight: '600' }, checkTime: { fontSize: 11, color: COLORS.accentGreen, fontWeight: '600' },
-    lateText: { fontSize: 11, color: COLORS.accentRed, fontWeight: '600' }, deleteBtn: { padding: SPACING.sm },
-    fab: { position: 'absolute', bottom: 24, right: 20, width: 56, height: 56, borderRadius: 28, backgroundColor: COLORS.primary, justifyContent: 'center', alignItems: 'center', elevation: 8, shadowColor: COLORS.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 8 },
+    container: { flex: 1, backgroundColor: COLORS.background },
+    dateSelector: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: SPACING.sm, paddingHorizontal: SPACING.lg },
+    dateArrow: { padding: SPACING.sm },
+    dateText: { fontSize: 18, fontWeight: '800', color: COLORS.textPrimary, textAlign: 'center' },
+    dateSubText: { fontSize: 11, color: COLORS.textSecondary, textAlign: 'center', marginTop: 2 },
+    scrollContainer: { flex: 1 },
+    scrollContent: { flex: 1 },
+    gridContainer: { flex: 1, backgroundColor: COLORS.surface, borderTopWidth: 1, borderTopColor: COLORS.border, paddingBottom: 10 },
+    row: { flex: 1, flexDirection: 'row', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: COLORS.borderLight },
+    slotsContainer: { flex: 1, flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', paddingRight: SPACING.lg },
+    hourLabel: { width: 50, color: COLORS.textSecondary, fontSize: 11, textAlign: 'center', fontWeight: '600' },
+    
+    emptyCell: { width: 34, height: 34 },
+    habitCell: { width: 24, height: 24, borderRadius: BORDER_RADIUS.sm, borderWidth: 1.5, backgroundColor: COLORS.background, justifyContent: 'center', alignItems: 'center' },
+    habitCellChecked: { backgroundColor: COLORS.accentGreen, borderColor: '#10b981' },
+    
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
     modalContent: { backgroundColor: COLORS.background, borderTopLeftRadius: BORDER_RADIUS.xxl, borderTopRightRadius: BORDER_RADIUS.xxl, padding: SPACING.xxl, maxHeight: '90%' },
     modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.xl },
-    modalTitle: { fontSize: 22, fontWeight: '800', color: COLORS.textPrimary },
-    inputLabel: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary, marginBottom: SPACING.sm, marginTop: SPACING.md },
-    input: { backgroundColor: COLORS.surface, borderRadius: BORDER_RADIUS.md, padding: SPACING.lg, color: COLORS.textPrimary, fontSize: 16, borderWidth: 1, borderColor: COLORS.border },
-    catPicker: { flexDirection: 'row', gap: 8 },
-    catItem: { flex: 1, alignItems: 'center', paddingVertical: SPACING.md, borderRadius: BORDER_RADIUS.md, borderWidth: 1.5, borderColor: COLORS.border, backgroundColor: COLORS.surface },
-    catEmoji: { fontSize: 20 }, catLabel: { fontSize: 11, fontWeight: '600', color: COLORS.textSecondary, marginTop: 2 },
-    submitBtn: { backgroundColor: COLORS.primary, borderRadius: BORDER_RADIUS.md, paddingVertical: SPACING.lg, alignItems: 'center', marginTop: SPACING.xxl, marginBottom: SPACING.xxxl },
+    modalTitle: { fontSize: 20, fontWeight: '800', color: COLORS.textPrimary },
+    inputLabel: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary, marginBottom: 6, marginTop: SPACING.md },
+    input: { backgroundColor: COLORS.surface, borderRadius: BORDER_RADIUS.md, padding: SPACING.lg, color: COLORS.textPrimary, fontSize: 15, borderWidth: 1, borderColor: COLORS.border },
+    hStack: { flexDirection: 'row' },
+    radioItem: { paddingVertical: SPACING.md, paddingHorizontal: SPACING.md, borderWidth: 1, borderColor: COLORS.border, borderRadius: BORDER_RADIUS.sm, marginBottom: 6 },
+    radioSelected: { borderColor: COLORS.primary, backgroundColor: COLORS.primary + '20' },
+    pill: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, borderWidth: 1, borderColor: COLORS.border, marginRight: 8, backgroundColor: COLORS.surface },
+    pillSelected: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+    submitBtn: { backgroundColor: COLORS.primary, borderRadius: BORDER_RADIUS.md, paddingVertical: SPACING.lg, alignItems: 'center', marginTop: SPACING.md },
     submitBtnText: { fontSize: 16, fontWeight: '700', color: '#FFF' },
 });
 

@@ -1,42 +1,52 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { COLORS, BORDER_RADIUS, SPACING } from '../theme/colors';
-import { Card, StatCard, SectionHeader } from '../components/Card';
-import { formatCurrency, getTodayKey } from '../utils/helpers';
-import { getExpenses, getExpenseSummary, getDailyRecords, getTrades, getHabitChecks, getAppUsage } from '../db/database';
+import { View, Text, StyleSheet, ScrollView, RefreshControl, Dimensions } from 'react-native';
+import { COLORS, SPACING } from '../theme/colors';
+import { SectionHeader } from '../components/Card';
+import { getExpenses, getDailyRecords, getTrades } from '../db/database';
+import { format, subDays } from 'date-fns';
+import { LineChart, BarChart } from 'react-native-chart-kit';
+
+const screenWidth = Dimensions.get('window').width - (SPACING.lg * 2);
 
 const HomeScreen = ({ navigation }) => {
     const [refreshing, setRefreshing] = useState(false);
-    const [todayExpenses, setTodayExpenses] = useState(0);
-    const [todayIncome, setTodayIncome] = useState(0);
-    const [productiveHours, setProductiveHours] = useState(0);
-    const [tradePnL, setTradePnL] = useState(0);
-    const [habitsCompleted, setHabitsCompleted] = useState(0);
-    const [habitsTotal, setHabitsTotal] = useState(0);
-    const [screenTime, setScreenTime] = useState(0);
+    const [weekLabels, setWeekLabels] = useState([]);
+    const [expensesData, setExpensesData] = useState([0,0,0,0,0,0,0]);
+    const [productivityData, setProductivityData] = useState([0,0,0,0,0,0,0]);
+    const [tradeData, setTradeData] = useState([0,0,0,0,0,0,0]);
 
     const loadDashboard = useCallback(async () => {
-        const today = getTodayKey();
         try {
-            const expenses = await getExpenses(today);
-            let spent = 0, inc = 0;
-            expenses.forEach(e => { if (e.type === 'income') inc += e.amount; else spent += e.amount; });
-            setTodayExpenses(spent);
-            setTodayIncome(inc);
+            const labels = [];
+            const dates = [];
+            for (let i = 6; i >= 0; i--) {
+                const date = subDays(new Date(), i);
+                labels.push(format(date, 'EEE'));
+                dates.push(format(date, 'yyyy-MM-dd'));
+            }
+            setWeekLabels(labels);
 
-            const records = await getDailyRecords(today);
-            setProductiveHours(records.reduce((s, r) => s + (r.hours_spent || 0), 0));
+            const allExpenses = await getExpenses();
+            const expData = dates.map(d => {
+                const dayExp = allExpenses.filter(e => e.date === d && e.type !== 'income');
+                return dayExp.reduce((sum, e) => sum + e.amount, 0);
+            });
+            setExpensesData(expData);
 
-            const trades = await getTrades(today);
-            setTradePnL(trades.reduce((s, t) => s + (t.profit_loss || 0), 0));
+            const allRecords = await getDailyRecords();
+            const prodData = dates.map(d => {
+                const dayRecs = allRecords.filter(r => r.date === d);
+                return dayRecs.reduce((sum, r) => sum + (r.hours_spent || 0), 0);
+            });
+            setProductivityData(prodData);
 
-            const habits = await getHabitChecks(today);
-            setHabitsTotal(habits.length);
-            setHabitsCompleted(habits.filter(h => h.is_checked).length);
+            const allTrades = await getTrades();
+            const trdData = dates.map(d => {
+                const dayTrades = allTrades.filter(t => t.date === d);
+                return dayTrades.reduce((sum, t) => sum + (t.profit_loss || 0), 0);
+            });
+            setTradeData(trdData);
 
-            const usage = await getAppUsage(today);
-            setScreenTime(usage.reduce((s, u) => s + (u.hours_used || 0), 0));
         } catch (e) { console.error(e); }
     }, []);
 
@@ -51,65 +61,91 @@ const HomeScreen = ({ navigation }) => {
     const hour = now.getHours();
     const greeting = hour < 12 ? 'Good Morning' : hour < 17 ? 'Good Afternoon' : 'Good Evening';
 
-    const quickActions = [
-        { title: 'Expenses', emoji: '💰', screen: 'Expenses', color: COLORS.accentRed },
-        { title: 'Daily Log', emoji: '📋', screen: 'Daily', color: COLORS.accent },
-        { title: 'Trading', emoji: '📈', screen: 'Trading', color: COLORS.accentGreen },
-        { title: 'Habits', emoji: '✅', screen: 'Habits', color: COLORS.accentOrange },
-        { title: 'App Usage', emoji: '📱', screen: 'Usage', color: COLORS.primary },
-    ];
+    const chartConfig = {
+        backgroundGradientFrom: COLORS.surface,
+        backgroundGradientTo: COLORS.surfaceHighlight,
+        color: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
+        labelColor: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
+        strokeWidth: 2,
+        barPercentage: 0.5,
+        useShadowColorFromDataset: false,
+        decimalPlaces: 0,
+    };
+
+    const expHasData = expensesData.some(d => d > 0);
+    const prodHasData = productivityData.some(d => d > 0);
+    const trdHasData = tradeData.some(d => d !== 0);
 
     return (
         <ScrollView style={s.container} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}>
             <View style={s.header}>
                 <View>
                     <Text style={s.greeting}>{greeting} 👋</Text>
-                    <Text style={s.date}>{now.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}</Text>
+                    <Text style={s.date}>{format(now, 'EEEE, d MMMM')}</Text>
                 </View>
                 <View style={s.avatar}>
                     <Text style={s.avatarText}>ID</Text>
                 </View>
             </View>
 
-            {/* Quick Actions */}
-            <View style={s.quickActions}>
-                {quickActions.map(a => (
-                    <TouchableOpacity key={a.screen} style={s.quickAction} onPress={() => navigation.navigate(a.screen)} activeOpacity={0.7}>
-                        <View style={[s.qaIcon, { backgroundColor: a.color + '15' }]}>
-                            <Text style={s.qaEmoji}>{a.emoji}</Text>
-                        </View>
-                        <Text style={s.qaTitle}>{a.title}</Text>
-                    </TouchableOpacity>
-                ))}
+            <SectionHeader title="Weekly Analysis" />
+
+            <Text style={s.chartTitle}>Productivity (Hours)</Text>
+            <View style={s.chartContainer}>
+                <LineChart
+                    data={{
+                        labels: weekLabels.length ? weekLabels : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+                        datasets: [{ data: prodHasData ? productivityData : [0,0,0,0,0,0,0] }]
+                    }}
+                    width={screenWidth}
+                    height={220}
+                    chartConfig={{
+                        ...chartConfig,
+                        color: (opacity = 1) => `rgba(139, 92, 246, ${opacity})`, 
+                        propsForDots: { r: "4", strokeWidth: "2", stroke: COLORS.primary }
+                    }}
+                    bezier
+                    style={s.chart}
+                />
             </View>
 
-            {/* Today's Summary */}
-            <SectionHeader title="Today's Overview" />
-            <View style={s.statsRow}>
-                <StatCard title="Spent" value={formatCurrency(todayExpenses)} color={COLORS.accentRed} />
-                <StatCard title="Income" value={formatCurrency(todayIncome)} color={COLORS.accentGreen} />
-            </View>
-            <View style={s.statsRow}>
-                <StatCard title="Productive" value={`${productiveHours.toFixed(1)}h`} color={COLORS.accent} />
-                <StatCard title="Screen Time" value={`${screenTime.toFixed(1)}h`} color={COLORS.primary} />
-            </View>
-            <View style={s.statsRow}>
-                <StatCard title="Trade P&L" value={formatCurrency(tradePnL)} color={tradePnL >= 0 ? COLORS.accentGreen : COLORS.accentRed} fullWidth />
+            <Text style={s.chartTitle}>Expenses (₹)</Text>
+            <View style={s.chartContainer}>
+                <BarChart
+                    data={{
+                        labels: weekLabels.length ? weekLabels : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+                        datasets: [{ data: expHasData ? expensesData : [0,0,0,0,0,0,0] }]
+                    }}
+                    width={screenWidth}
+                    height={220}
+                    yAxisLabel="₹"
+                    chartConfig={{
+                        ...chartConfig,
+                        color: (opacity = 1) => `rgba(244, 63, 94, ${opacity})`, 
+                    }}
+                    style={s.chart}
+                />
             </View>
 
-            {/* Habits Progress */}
-            <Card style={s.habitsCard}>
-                <View style={s.habitsHeader}>
-                    <Text style={s.habitsTitle}>Habits Progress</Text>
-                    <Text style={[s.habitsPercent, { color: COLORS.accentGreen }]}>
-                        {habitsTotal > 0 ? Math.round((habitsCompleted / habitsTotal) * 100) : 0}%
-                    </Text>
-                </View>
-                <View style={s.habitsBarBg}>
-                    <View style={[s.habitsBarFill, { width: `${habitsTotal > 0 ? (habitsCompleted / habitsTotal) * 100 : 0}%` }]} />
-                </View>
-                <Text style={s.habitsSub}>{habitsCompleted} of {habitsTotal} habits completed today</Text>
-            </Card>
+            <Text style={s.chartTitle}>Trading P&L (₹)</Text>
+            <View style={s.chartContainer}>
+                <LineChart
+                     data={{
+                        labels: weekLabels.length ? weekLabels : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+                        datasets: [{ data: (trdHasData ? tradeData : [0,0,0,0,0,0,0]).map(v => v || 0) }]
+                    }}
+                    width={screenWidth}
+                    height={220}
+                    yAxisLabel="₹"
+                    chartConfig={{
+                        ...chartConfig,
+                        color: (opacity = 1) => `rgba(16, 185, 129, ${opacity})`, 
+                        propsForDots: { r: "4", strokeWidth: "2", stroke: COLORS.accentGreen }
+                    }}
+                    bezier
+                    style={s.chart}
+                />
+            </View>
 
             <View style={{ height: 40 }} />
         </ScrollView>
@@ -123,19 +159,9 @@ const s = StyleSheet.create({
     date: { fontSize: 14, color: COLORS.textSecondary, marginTop: 4, fontWeight: '500' },
     avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.primary, justifyContent: 'center', alignItems: 'center' },
     avatarText: { fontSize: 16, fontWeight: '800', color: '#FFF' },
-    quickActions: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: SPACING.md, gap: 8 },
-    quickAction: { width: '18.4%', backgroundColor: COLORS.surface, borderRadius: BORDER_RADIUS.md, paddingVertical: SPACING.lg, alignItems: 'center', borderWidth: 1, borderColor: COLORS.border },
-    qaIcon: { width: 44, height: 44, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginBottom: 6 },
-    qaEmoji: { fontSize: 22 },
-    qaTitle: { fontSize: 11, fontWeight: '700', color: COLORS.textSecondary },
-    statsRow: { flexDirection: 'row', marginBottom: SPACING.sm },
-    habitsCard: { marginTop: SPACING.sm },
-    habitsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-    habitsTitle: { fontSize: 16, fontWeight: '700', color: COLORS.textPrimary },
-    habitsPercent: { fontSize: 20, fontWeight: '900' },
-    habitsBarBg: { height: 8, backgroundColor: COLORS.surfaceHighlight, borderRadius: 4, marginVertical: SPACING.sm, overflow: 'hidden' },
-    habitsBarFill: { height: '100%', backgroundColor: COLORS.accentGreen, borderRadius: 4 },
-    habitsSub: { fontSize: 13, color: COLORS.textSecondary },
+    chartTitle: { fontSize: 16, fontWeight: '700', color: COLORS.textPrimary, marginTop: SPACING.md, marginBottom: SPACING.sm },
+    chartContainer: { backgroundColor: COLORS.surface, borderRadius: 16, overflow: 'hidden', paddingVertical: SPACING.md, borderWidth: 1, borderColor: COLORS.border },
+    chart: { marginVertical: 8, borderRadius: 16, paddingRight: 30 },
 });
 
 export default HomeScreen;

@@ -8,6 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import HomeScreen from './src/screens/HomeScreen';
 import ExpenseTracker from './src/screens/ExpenseTracker';
 import DailyRecords from './src/screens/DailyRecords';
+import TasksScreen from './src/screens/TasksScreen';
 import TradingTracker from './src/screens/TradingTracker';
 import HabitTracker from './src/screens/HabitTracker';
 import AppUsageTracker from './src/screens/AppUsageTracker';
@@ -30,6 +31,7 @@ const getTabIcon = (routeName, focused) => {
     Home: focused ? 'home' : 'home-outline',
     Expenses: focused ? 'wallet' : 'wallet-outline',
     Daily: focused ? 'document-text' : 'document-text-outline',
+    Tasks: focused ? 'checkbox' : 'checkbox-outline',
     Trading: focused ? 'trending-up' : 'trending-up-outline',
     Habits: focused ? 'checkmark-circle' : 'checkmark-circle-outline',
     Usage: focused ? 'phone-portrait' : 'phone-portrait-outline',
@@ -104,6 +106,7 @@ export default function App() {
         <Tab.Screen name="Home" component={HomeScreen} options={{ title: '🏠 Home' }} />
         <Tab.Screen name="Expenses" component={ExpenseTracker} options={{ title: '💰 Expenses' }} />
         <Tab.Screen name="Daily" component={DailyRecords} options={{ title: '📋 Daily' }} />
+        <Tab.Screen name="Tasks" component={TasksScreen} options={{ title: '☑️ Tasks' }} />
         <Tab.Screen name="Trading" component={TradingTracker} options={{ title: '📈 Trading' }} />
         <Tab.Screen name="Habits" component={HabitTracker} options={{ title: '✅ Habits' }} />
         <Tab.Screen name="Usage" component={AppUsageTracker} options={{ title: '📱 Apps' }} />

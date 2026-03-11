@@ -1,0 +1,105 @@
+Starting project at /home/david/applications/Altiora/Altiora
+Starting Metro Bundler
+
+The following packages should be updated for best compatibility with the installed expo version:
+  react-native-reanimated@4.2.2 - expected version: 4.2.1
+  react-native-safe-area-context@5.7.0 - expected version: ~5.6.2
+  react-native-screens@4.24.0 - expected version: ~4.23.0
+Your project may not work correctly until you install the expected versions of the packages.
+› Opening exp://127.0.0.1:8081 on My_New_Emulator
+Waiting on http://localhost:8081
+Logs for your project will appear below.
+Android ./index.js ▓▓▓▓▓▓░░░░░░░░░░ 40.7% (386/605)
+Android ./index.js ▓▓▓▓▓▓▓▓▓▓▓░░░░░ 74.0% (694/807)
+Android ./index.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░ 90.3% (1132/1191)
+Android ./index.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.9% (1358/1359)
+Android Bundled 13968ms index.js (1368 modules)
+ ERROR  [Error: Call to function 'NativeDatabase.prepareAsync' has been rejected.
+→ Caused by: java.lang.NullPointerException: java.lang.NullPointerException]
+ ERROR  [Error: Call to function 'NativeDatabase.prepareAsync' has been rejected.
+→ Caused by: java.lang.NullPointerException: java.lang.NullPointerException]
+ ERROR  [Error: Call to function 'NativeDatabase.prepareAsync' has been rejected.
+→ Caused by: java.lang.NullPointerException: java.lang.NullPointerException]
+ ERROR  DB init error: [Error: Call to function 'NativeDatabase.execAsync' has been rejected.
+→ Caused by: java.lang.NullPointerException: java.lang.NullPointerException]
+ ERROR  Error loading daily records: [Error: Call to function 'NativeDatabase.execAsync' has been rejected.
+→ Caused by: java.lang.NullPointerException: java.lang.NullPointerException]
+ ERROR  Error loading expenses: [Error: Call to function 'NativeDatabase.execAsync' has been rejected.
+→ Caused by: java.lang.NullPointerException: java.lang.NullPointerException]
+ ERROR  Error loading app usage: [Error: Call to function 'NativeDatabase.execAsync' has been rejected.
+→ Caused by: java.lang.NullPointerException: java.lang.NullPointerException]
+ ERROR  [Error: Call to function 'NativeDatabase.execAsync' has been rejected.
+→ Caused by: java.lang.NullPointerException: java.lang.NullPointerException]
+ ERROR  [Error: Call to function 'NativeDatabase.execAsync' has been rejected.
+→ Caused by: java.lang.NullPointerException: java.lang.NullPointerException]
+ ERROR  [Error: Call to function 'NativeDatabase.execAsync' has been rejected.
+→ Caused by: java.lang.NullPointerException: java.lang.NullPointerException]
+ ERROR  [Error: Call to function 'NativeDatabase.execAsync' has been rejected.
+→ Caused by: java.lang.NullPointerException: java.lang.NullPointerException]
+ ERROR  [Error: Call to function 'NativeDatabase.execAsync' has been rejected.
+→ Caused by: java.lang.NullPointerException: java.lang.NullPointerException]
+ ERROR  Error loading daily records: [Error: Call to function 'NativeDatabase.execAsync' has been rejected.
+→ Caused by: java.lang.NullPointerException: java.lang.NullPointerException]
+ ERROR  Error loading expenses: [Error: Call to function 'NativeDatabase.execAsync' has been rejected.
+→ Caused by: java.lang.NullPointerException: java.lang.NullPointerException]
+ ERROR  [Error: Call to function 'NativeDatabase.execAsync' has been rejected.
+→ Caused by: java.lang.NullPointerException: java.lang.NullPointerException]
+ ERROR  Error loading app usage: [Error: Call to function 'NativeDatabase.execAsync' has been rejected.
+→ Caused by: java.lang.NullPointerException: java.lang.NullPointerException]
+ ERROR  [Error: Call to function 'NativeDatabase.execAsync' has been rejected.
+→ Caused by: java.lang.NullPointerException: java.lang.NullPointerException]
+ ERROR  DB init error: [Error: Call to function 'NativeDatabase.execAsync' has been rejected.
+→ Caused by: java.lang.NullPointerException: java.lang.NullPointerException]
+ ERROR  [Error: Call to function 'NativeDatabase.prepareAsync' has been rejected.
+→ Caused by: java.lang.NullPointerException: java.lang.NullPointerException]
+ ERROR  [Error: Call to function 'NativeDatabase.prepareAsync' has been rejected.
+→ Caused by: java.lang.NullPointerException: java.lang.NullPointerException]
+ ERROR  [Error: Call to function 'NativeDatabase.prepareAsync' has been rejected.
+→ Caused by: java.lang.NullPointerException: java.lang.NullPointerException]
+ ERROR  [Error: Call to function 'NativeDatabase.prepareAsync' has been rejected.
+→ Caused by: java.lang.NullPointerException: java.lang.NullPointerException]
+ ERROR  [Error: Call to function 'NativeDatabase.prepareAsync' has been rejected.
+→ Caused by: java.lang.NullPointerException: java.lang.NullPointerException]
+ ERROR  [Error: Call to function 'NativeDatabase.prepareAsync' has been rejected.
+→ Caused by: java.lang.NullPointerException: java.lang.NullPointerException]
+
+  #  Node.js[11129]: void node::ResetStdio() at ../src/node.cc:751
+  #  Assertion failed: !(err != 0) || (err == -1 && (*__errno_location ()) == 1)
+
+----- Native stack trace -----
+
+ 1: 0xcb5137 node::Assert(node::AssertionInfo const&) [node]
+ 2: 0xc61934  [node]
+ 3: 0x7f2a148289e1  [/lib64/libc.so.6]
+ 4: 0x7f2a14828abe  [/lib64/libc.so.6]
+ 5: 0xbc162f node::DefaultProcessExitHandlerInternal(node::Environment*, node::ExitCode) [node]
+ 6: 0xc20f1f node::Environment::Exit(node::ExitCode) [node]
+ 7: 0xf507cf v8::internal::FunctionCallbackArguments::Call(v8::internal::CallHandlerInfo) [node]
+ 8: 0xf5103d  [node]
+ 9: 0xf51505 v8::internal::Builtin_HandleApiCall(int, unsigned long*, v8::internal::Isolate*) [node]
+10: 0x195bdf6  [node]
+
+  #  Node.js[11129]: void node::ResetStdio() at ../src/node.cc:751
+  #  Assertion failed: !(err != 0) || (err == -1 && (*__errno_location ()) == 1)
+
+----- Native stack trace -----
+
+ 1: 0xcb5137 node::Assert(node::AssertionInfo const&) [node]
+ 2: 0xc61934  [node]
+ 3: 0xc61f4d node::TrapWebAssemblyOrContinue(int, siginfo_t*, void*) [node]
+ 4: 0x7f2a148262c0  [/lib64/libc.so.6]
+ 5: 0x158b8d7 v8::internal::tracing::TraceEventHelper::GetTracingController() [node]
+ 6: 0x10627d5 v8::internal::Isolate::CaptureDetailedStackTrace(int, v8::StackTrace::StackTraceOptions) [node]
+ 7: 0xef1040 v8::StackTrace::CurrentStackTrace(v8::Isolate*, int, v8::StackTrace::StackTraceOptions) [node]
+ 8: 0xcb50a8 node::GetCurrentStackTrace(v8::Isolate*, int) [node]
+ 9: 0xc01bbb node::DumpJavaScriptBacktrace(_IO_FILE*) [node]
+10: 0xcb5143 node::Assert(node::AssertionInfo const&) [node]
+11: 0xc61934  [node]
+12: 0x7f2a148289e1  [/lib64/libc.so.6]
+13: 0x7f2a14828abe  [/lib64/libc.so.6]
+14: 0xbc162f node::DefaultProcessExitHandlerInternal(node::Environment*, node::ExitCode) [node]
+15: 0xc20f1f node::Environment::Exit(node::ExitCode) [node]
+16: 0xf507cf v8::internal::FunctionCallbackArguments::Call(v8::internal::CallHandlerInfo) [node]
+17: 0xf5103d  [node]
+18: 0xf51505 v8::internal::Builtin_HandleApiCall(int, unsigned long*, v8::internal::Isolate*) [node]
+19: 0x195bdf6  [node]
