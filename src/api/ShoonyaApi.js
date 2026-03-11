@@ -79,17 +79,46 @@ const sha256 = (ascii) => {
     return result;
 };
 
-// Simplified TOTP generation (Requires hmac-sha1)
-// Since we want to be independent of libs, I'll include a simple hmac-sha1/totp
-// logic or use a snippet.
+import CryptoJS from 'crypto-js';
 
 const generateTOTP = (secret) => {
-    // This is a placeholder for a real TOTP generator if we don't have libraries.
-    // However, for Shoonya, we MUST have a working one.
-    // I will use a known one-file TOTP generator logic.
-    return require('hotp-totp-generator').totp({ secret, digits: 6 });
+    try {
+        const base32chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+        let bits = '';
+        let hex = '';
+        
+        secret = secret.replace(/=+$/, '').toUpperCase();
+        
+        for (let i = 0; i < secret.length; i++) {
+            let val = base32chars.indexOf(secret.charAt(i));
+            if(val === -1) continue;
+            bits += val.toString(2).padStart(5, '0');
+        }
+        
+        for (let i = 0; i < bits.length - 3; i += 4) {
+            const chunk = bits.substring(i, i + 4);
+            hex += parseInt(chunk, 2).toString(16);
+        }
+        
+        let time = Math.floor(Date.now() / 1000 / 30);
+        let timeHex = time.toString(16).padStart(16, '0');
+        
+        const hmac = CryptoJS.HmacSHA1(
+            CryptoJS.enc.Hex.parse(timeHex),
+            CryptoJS.enc.Hex.parse(hex)
+        );
+        const hmacHex = hmac.toString(CryptoJS.enc.Hex);
+        
+        const offset = parseInt(hmacHex.substring(hmacHex.length - 1), 16) * 2;
+        let totp = (parseInt(hmacHex.substring(offset, offset + 8), 16) & 0x7fffffff) + '';
+        
+        totp = totp.substring(totp.length - 6);
+        return totp.padStart(6, '0');
+    } catch(e) {
+        console.error('TOTP Generate Error:', e);
+        return '000000';
+    }
 };
-
 class ShoonyaApi {
     constructor() {
         this.baseUrl = 'https://api.shoonya.com/NorenWClientTP/';
@@ -124,9 +153,7 @@ class ShoonyaApi {
         // We'll use a dynamic TOTP if we have the secret
         let factor2 = '';
         try {
-            // If we can't use hotp-totp-generator, we might need to fallback
-            const totp = require('hotp-totp-generator');
-            factor2 = totp.totp({ secret: totpSecret, digits: 6 });
+            factor2 = generateTOTP(totpSecret);
         } catch (e) {
             console.error('TOTP Generation Failed:', e);
             throw new Error('TOTP Library Missing');
