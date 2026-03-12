@@ -6,6 +6,7 @@ import { Card, StatCard, EmptyState, SectionHeader } from '../components/Card';
 import { formatCurrency, getTodayKey, getRelativeDate, formatDate, formatDateKey } from '../utils/helpers';
 import { addTrade, getTrades, getTradeSummary, deleteTrade, saveShoonyaConfig, getShoonyaConfig, getTradingPresets, saveTradingPreset, deleteTradingPreset } from '../db/database';
 import ShoonyaApi from '../api/ShoonyaApi';
+import AnalysisModal from '../components/AnalysisModal';
 
 const TradingTracker = () => {
     // Standard data
@@ -13,6 +14,7 @@ const TradingTracker = () => {
     const [showModal, setShowModal] = useState(false);
     const [showConfigModal, setShowConfigModal] = useState(false);
     const [showPresetModal, setShowPresetModal] = useState(false);
+    const [showAnalysisModal, setShowAnalysisModal] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
     const [selectedDate, setSelectedDate] = useState(getTodayKey());
     const [monthlySummary, setMonthlySummary] = useState({});
@@ -174,6 +176,9 @@ const TradingTracker = () => {
                         <Text style={s.connectBtnText}>{isConnected ? 'Disconnect' : 'Connect'}</Text>
                     )}
                 </TouchableOpacity>
+                <TouchableOpacity style={s.settingsIcon} onPress={() => setShowAnalysisModal(true)}>
+                    <Ionicons name="bar-chart-outline" size={20} color={COLORS.primary} />
+                </TouchableOpacity>
                 <TouchableOpacity style={s.settingsIcon} onPress={() => setShowConfigModal(true)}>
                     <Ionicons name="settings-outline" size={20} color={COLORS.textSecondary} />
                 </TouchableOpacity>
@@ -289,6 +294,13 @@ const TradingTracker = () => {
                     </View>
                 </View>
             </Modal>
+
+            {/* Analysis Modal */}
+            <AnalysisModal
+                visible={showAnalysisModal}
+                onClose={() => setShowAnalysisModal(false)}
+                isConnected={isConnected}
+            />
         </View>
     );
 };

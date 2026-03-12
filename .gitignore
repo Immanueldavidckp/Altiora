@@ -43,3 +43,9 @@ yarn-error.*
 # Allow the releases folder even if it contains large files
 !/releases/
 !/releases/*.apk
+
+# logs and generic files
+*.log
+*.txt
+*.db
+setup-rn-android.sh

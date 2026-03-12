@@ -211,6 +211,18 @@ class ShoonyaApi {
     async getPositions() {
         return await this.request('PositionBook', { actid: this.actid });
     }
+
+    async searchScrip(stext, exch = 'NSE') {
+        return await this.request('SearchScrip', { stext, exch });
+    }
+
+    async getQuotes(exch, token) {
+        return await this.request('GetQuotes', { exch, token });
+    }
+
+    async getChartData(exch, token, starttime, endtime, interval = '1') {
+        return await this.request('TPSeries', { exch, token, st: starttime, et: endtime, intrv: interval });
+    }
 }
 
 export default new ShoonyaApi();
