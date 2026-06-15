@@ -256,6 +256,23 @@ const initializeDatabase = async (database) => {
   } catch (e) {
       console.warn('expenses time column migration failed:', e);
   }
+
+  // FlatTrade migration: the broker config table (originally for Shoonya) needs
+  // extra columns for FlatTrade's OAuth flow (api_secret + daily access token).
+  try {
+      const cfgCols = await database.getAllAsync("PRAGMA table_info(shoonya_config)");
+      const addCol = async (name, def) => {
+          if (!cfgCols.some(c => c.name === name)) {
+              await database.runAsync(`ALTER TABLE shoonya_config ADD COLUMN ${name} ${def};`);
+          }
+      };
+      await addCol('api_secret', 'TEXT');
+      await addCol('access_token', 'TEXT');
+      await addCol('token_date', 'TEXT');
+      await addCol('redirect_url', 'TEXT');
+  } catch (e) {
+      console.warn('flattrade config migration failed:', e);
+  }
 };
 
 // ============= EXPENSES =============
@@ -752,6 +769,29 @@ export const saveShoonyaConfig = async (config) => {
 export const getShoonyaConfig = async () => {
     const db = await getDatabase();
     return await db.getFirstAsync('SELECT * FROM shoonya_config WHERE is_active = 1');
+};
+
+// ============= FLATTRADE TRADING =============
+// Stores FlatTrade credentials in the shared broker config table. The access
+// token is exchanged daily via the OAuth flow and cached with its date.
+export const saveFlatTradeConfig = async (config) => {
+    const db = await getDatabase();
+    await db.runAsync('DELETE FROM shoonya_config'); // single broker config
+    const result = await db.runAsync(
+        'INSERT INTO shoonya_config (user_id, api_key, api_secret, actid, redirect_url, is_active) VALUES (?, ?, ?, ?, ?, 1)',
+        [config.user_id, config.api_key, config.api_secret, config.user_id, config.redirect_url || null]
+    );
+    return result.lastInsertRowId;
+};
+
+export const getFlatTradeConfig = async () => {
+    const db = await getDatabase();
+    return await db.getFirstAsync('SELECT * FROM shoonya_config WHERE is_active = 1');
+};
+
+export const saveFlatTradeToken = async (token, dateKey) => {
+    const db = await getDatabase();
+    await db.runAsync('UPDATE shoonya_config SET access_token = ?, token_date = ? WHERE is_active = 1', [token, dateKey]);
 };
 
 export const saveTradingPreset = async (preset) => {

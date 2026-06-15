@@ -4,9 +4,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, BORDER_RADIUS, SPACING } from '../theme/colors';
 import { Card, StatCard, EmptyState, SectionHeader } from '../components/Card';
 import { formatCurrency, getTodayKey, getRelativeDate, formatDate, formatDateKey } from '../utils/helpers';
-import { addTrade, getTrades, getTradeSummary, deleteTrade, saveShoonyaConfig, getShoonyaConfig, getTradingPresets, saveTradingPreset, deleteTradingPreset } from '../db/database';
-import ShoonyaApi from '../api/ShoonyaApi';
+import { addTrade, getTrades, getTradeSummary, deleteTrade, saveFlatTradeConfig, getFlatTradeConfig, saveFlatTradeToken, getTradingPresets, saveTradingPreset, deleteTradingPreset } from '../db/database';
+import FlatTradeApi from '../api/FlatTradeApi';
 import AnalysisModal from '../components/AnalysisModal';
+import FlatTradeLoginModal from '../components/FlatTradeLoginModal';
+
+const DEFAULT_REDIRECT = 'https://trade.scratchforge.in/';
 
 const TradingTracker = () => {
     // Standard data
@@ -26,19 +29,19 @@ const TradingTracker = () => {
     const [sellAmount, setSellAmount] = useState('');
     const [tradeNotes, setTradeNotes] = useState('');
 
-    // Shoonya state
+    // FlatTrade state
     const [config, setConfig] = useState(null);
     const [isConnected, setIsConnected] = useState(false);
     const [connecting, setConnecting] = useState(false);
     const [margin, setMargin] = useState(null);
     const [presets, setPresets] = useState([]);
+    const [showLoginModal, setShowLoginModal] = useState(false);
 
     // Config form
     const [userId, setUserId] = useState('');
-    const [password, setPassword] = useState('');
     const [apiKey, setApiKey] = useState('');
-    const [vendorCode, setVendorCode] = useState('');
-    const [totpSecret, setTotpSecret] = useState('');
+    const [apiSecret, setApiSecret] = useState('');
+    const [redirectUrl, setRedirectUrl] = useState(DEFAULT_REDIRECT);
     
     // Preset form
     const [presetName, setPresetName] = useState('');
@@ -56,13 +59,13 @@ const TradingTracker = () => {
             const summary = await getTradeSummary(sm, em);
             setMonthlySummary(summary || {});
 
-            const cfg = await getShoonyaConfig();
+            const cfg = await getFlatTradeConfig();
             setConfig(cfg);
             if (cfg) {
                 setUserId(cfg.user_id || '');
                 setApiKey(cfg.api_key || '');
-                setVendorCode(cfg.vendor_code || '');
-                setTotpSecret(cfg.totp_secret || '');
+                setApiSecret(cfg.api_secret || '');
+                setRedirectUrl(cfg.redirect_url || DEFAULT_REDIRECT);
             }
 
             const prs = await getTradingPresets();
@@ -72,36 +75,59 @@ const TradingTracker = () => {
 
     useEffect(() => { loadData(); }, [loadData]);
 
+    const goLive = async () => {
+        setIsConnected(true);
+        try {
+            const limits = await FlatTradeApi.getLimits();
+            setMargin(limits);
+        } catch (e) { /* margin is best-effort */ }
+    };
+
     const handleConnect = async () => {
-        if (!config) { setShowConfigModal(true); return; }
+        if (!config || !config.api_key || !config.api_secret) { setShowConfigModal(true); return; }
         setConnecting(true);
         try {
-            const res = await ShoonyaApi.login({
-                userId: config.user_id,
-                password: config.password,
-                apiKey: config.api_key,
-                vendorCode: config.vendor_code,
-                totpSecret: config.totp_secret,
-                actid: config.actid || config.user_id
-            });
-            if (res.success) {
-                setIsConnected(true);
-                const limits = await ShoonyaApi.getLimits();
-                setMargin(limits);
+            // Reuse today's token if we already exchanged one (FlatTrade tokens
+            // are valid for the trading day only).
+            if (config.access_token && config.token_date === getTodayKey()) {
+                FlatTradeApi.setSession(config.user_id, config.access_token);
+                await goLive();
             } else {
-                Alert.alert('Connection Failed', res.message);
+                // Need a fresh login: open the FlatTrade WebView OAuth flow.
+                setShowLoginModal(true);
             }
         } catch (e) {
-            Alert.alert('Error', 'Ensure you have API credentials set and Internet connection.');
+            Alert.alert('Error', 'Could not connect. Check your credentials and internet.');
+        } finally {
+            setConnecting(false);
+        }
+    };
+
+    // Called by the WebView modal once it captures ?code= from the redirect.
+    const handleAuthCode = async (code) => {
+        setShowLoginModal(false);
+        setConnecting(true);
+        try {
+            FlatTradeApi.setSession(config.user_id, null);
+            const res = await FlatTradeApi.getToken(config.api_key, code, config.api_secret);
+            if (res.success) {
+                await saveFlatTradeToken(res.token, getTodayKey());
+                await goLive();
+                loadData();
+            } else {
+                Alert.alert('Login Failed', res.message || 'Token exchange failed');
+            }
+        } catch (e) {
+            Alert.alert('Error', 'Token exchange failed. Try again.');
         } finally {
             setConnecting(false);
         }
     };
 
     const handleQuickOrder = async (preset, type) => {
-        if (!isConnected) { Alert.alert('Not Connected', 'Please connect to Shoonya first'); return; }
+        if (!isConnected) { Alert.alert('Not Connected', 'Please connect to FlatTrade first'); return; }
         try {
-            const res = await ShoonyaApi.placeOrder({
+            const res = await FlatTradeApi.placeOrder({
                 tsym: preset.symbol,
                 qty: preset.quantity,
                 trantype: type, // B or S
@@ -120,8 +146,8 @@ const TradingTracker = () => {
     };
 
     const saveConfig = async () => {
-        if (!userId || !password || !apiKey || !totpSecret) { Alert.alert('Error', 'Fill all fields'); return; }
-        await saveShoonyaConfig({ user_id: userId, password, api_key: apiKey, vendor_code: vendorCode, totp_secret: totpSecret });
+        if (!userId || !apiKey || !apiSecret) { Alert.alert('Error', 'Client ID, API Key and API Secret are required'); return; }
+        await saveFlatTradeConfig({ user_id: userId.trim(), api_key: apiKey.trim(), api_secret: apiSecret.trim(), redirect_url: redirectUrl.trim() || DEFAULT_REDIRECT });
         setShowConfigModal(false);
         loadData();
     };
@@ -162,16 +188,16 @@ const TradingTracker = () => {
                 <TouchableOpacity onPress={() => navigateDate(1)} style={s.dateArrow}><Ionicons name="chevron-forward" size={22} color={COLORS.textPrimary} /></TouchableOpacity>
             </View>
 
-            {/* Shoonya Connection Bar */}
+            {/* FlatTrade Connection Bar */}
             <View style={[s.shoonyaBar, isConnected && s.shoonyaBarConnected]}>
                 <View style={s.shoonyaInfo}>
                     <Ionicons name="flash" size={18} color={isConnected ? COLORS.accentGreen : COLORS.textMuted} />
-                    <Text style={s.shoonyaStatus}>{isConnected ? 'Shoonya Connected' : 'Shoonya Offline'}</Text>
+                    <Text style={s.shoonyaStatus}>{isConnected ? 'FlatTrade Connected' : 'FlatTrade Offline'}</Text>
                     {isConnected && margin && (
                         <Text style={s.shoonyaBalance}>Base: {formatCurrency(parseFloat(margin.cash) || 0)}</Text>
                     )}
                 </View>
-                <TouchableOpacity style={s.connectBtn} onPress={() => isConnected ? setIsConnected(false) : handleConnect()}>
+                <TouchableOpacity style={s.connectBtn} onPress={() => isConnected ? (FlatTradeApi.clearSession(), setIsConnected(false)) : handleConnect()}>
                     {connecting ? <ActivityIndicator size="small" color="#FFF" /> : (
                         <Text style={s.connectBtnText}>{isConnected ? 'Disconnect' : 'Connect'}</Text>
                     )}
@@ -233,7 +259,7 @@ const TradingTracker = () => {
             {/* List */}
             <SectionHeader title="Trade Entries" rightText={`${trades.length} entries`} />
             <ScrollView style={s.list} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}>
-                {trades.length === 0 ? <EmptyState title="No trades recorded" subtitle="Connect Shoonya for live or manual log below" emoji="📉" /> :
+                {trades.length === 0 ? <EmptyState title="No trades recorded" subtitle="Connect FlatTrade for live or manual log below" emoji="📉" /> :
                     trades.map(t => (
                         <Card key={t.id} onPress={() => {}}>
                             <View style={s.tradeRow}>
@@ -263,14 +289,14 @@ const TradingTracker = () => {
                 <View style={s.modalOverlay}>
                     <View style={s.modalContent}>
                         <View style={s.modalHeader}>
-                            <Text style={s.modalTitle}>Shoonya API Config</Text>
+                            <Text style={s.modalTitle}>FlatTrade API Config</Text>
                             <TouchableOpacity onPress={() => setShowConfigModal(false)}><Ionicons name="close" size={24} color={COLORS.textSecondary}/></TouchableOpacity>
                         </View>
-                        <TextInput style={s.input} value={userId} onChangeText={setUserId} placeholder="User ID" placeholderTextColor={COLORS.textMuted}/>
-                        <TextInput style={s.input} value={password} onChangeText={setPassword} placeholder="Password" secureTextEntry placeholderTextColor={COLORS.textMuted}/>
-                        <TextInput style={s.input} value={apiKey} onChangeText={setApiKey} placeholder="API Key" placeholderTextColor={COLORS.textMuted}/>
-                        <TextInput style={s.input} value={totpSecret} onChangeText={setTotpSecret} placeholder="TOTP Secret" placeholderTextColor={COLORS.textMuted}/>
-                        <TextInput style={s.input} value={vendorCode} onChangeText={setVendorCode} placeholder="Vendor Code" placeholderTextColor={COLORS.textMuted}/>
+                        <TextInput style={s.input} value={userId} onChangeText={setUserId} placeholder="Client ID (e.g. FZ46051)" autoCapitalize="characters" placeholderTextColor={COLORS.textMuted}/>
+                        <TextInput style={s.input} value={apiKey} onChangeText={setApiKey} placeholder="API Key" autoCapitalize="none" placeholderTextColor={COLORS.textMuted}/>
+                        <TextInput style={s.input} value={apiSecret} onChangeText={setApiSecret} placeholder="API Secret" autoCapitalize="none" secureTextEntry placeholderTextColor={COLORS.textMuted}/>
+                        <TextInput style={s.input} value={redirectUrl} onChangeText={setRedirectUrl} placeholder="Redirect URL" autoCapitalize="none" placeholderTextColor={COLORS.textMuted}/>
+                        <Text style={s.configHint}>Must match the Redirect URL set on wall.flattrade.in. You'll log in via FlatTrade once per day.</Text>
                         <TouchableOpacity style={s.submitBtn} onPress={saveConfig}><Text style={s.submitBtnText}>Save Config</Text></TouchableOpacity>
                     </View>
                 </View>
@@ -300,6 +326,14 @@ const TradingTracker = () => {
                 visible={showAnalysisModal}
                 onClose={() => setShowAnalysisModal(false)}
                 isConnected={isConnected}
+            />
+
+            {/* FlatTrade OAuth Login (WebView) */}
+            <FlatTradeLoginModal
+                visible={showLoginModal}
+                apiKey={config?.api_key}
+                onCode={handleAuthCode}
+                onClose={() => { setShowLoginModal(false); setConnecting(false); }}
             />
         </View>
     );
@@ -347,6 +381,7 @@ const s = StyleSheet.create({
     modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.xl },
     modalTitle: { fontSize: 20, fontWeight: '800', color: COLORS.textPrimary },
     input: { backgroundColor: COLORS.background, borderRadius: BORDER_RADIUS.md, padding: 14, color: COLORS.textPrimary, fontSize: 14, borderWidth: 1, borderColor: COLORS.border, marginBottom: 12 },
+    configHint: { fontSize: 11, color: COLORS.textMuted, marginBottom: 4, lineHeight: 16 },
     row: { flexDirection: 'row', gap: 12, marginBottom: 0 },
     submitBtn: { backgroundColor: COLORS.primary, borderRadius: BORDER_RADIUS.md, paddingVertical: 14, alignItems: 'center', marginTop: 10 },
     submitBtnText: { fontSize: 15, fontWeight: '800', color: '#FFF' },

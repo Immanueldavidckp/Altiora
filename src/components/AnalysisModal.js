@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, Modal, TouchableOpacity, TextInput, ActivityInd
 import { Ionicons } from '@expo/vector-icons';
 import { LineChart } from 'react-native-chart-kit';
 import { COLORS, BORDER_RADIUS, SPACING } from '../theme/colors';
-import ShoonyaApi from '../api/ShoonyaApi';
+import FlatTradeApi from '../api/FlatTradeApi';
 
 const { width } = Dimensions.get('window');
 
@@ -44,7 +44,7 @@ const AnalysisModal = ({ visible, onClose, isConnected }) => {
         if (!searchQuery.trim()) return;
         setSearching(true);
         try {
-            const res = await ShoonyaApi.searchScrip(searchQuery.toUpperCase(), 'NSE');
+            const res = await FlatTradeApi.searchScrip(searchQuery.toUpperCase(), 'NSE');
             if (res && res.stat === 'Ok' && res.values) {
                 setSearchResults(res.values.slice(0, 10)); // top 10 results
             } else {
@@ -64,7 +64,7 @@ const AnalysisModal = ({ visible, onClose, isConnected }) => {
         setLoadingData(true);
         try {
             // Get Quotes
-            const quoteRes = await ShoonyaApi.getQuotes(stock.exch, stock.token);
+            const quoteRes = await FlatTradeApi.getQuotes(stock.exch, stock.token);
             if (quoteRes && quoteRes.stat === 'Ok') {
                 setQuoteData(quoteRes);
             }
@@ -73,7 +73,7 @@ const AnalysisModal = ({ visible, onClose, isConnected }) => {
             const endTime = Math.floor(Date.now() / 1000);
             const startTime = endTime - (7 * 24 * 60 * 60); // past 7 days roughly
 
-            const chartRes = await ShoonyaApi.getChartData(stock.exch, stock.token, startTime.toString(), endTime.toString(), '60'); // 60 min interval
+            const chartRes = await FlatTradeApi.getChartData(stock.exch, stock.token, startTime.toString(), endTime.toString(), '60'); // 60 min interval
 
             if (chartRes && chartRes.length > 0) {
                 // Ensure chartRes is an array and reverse it to have oldest to newest if needed
@@ -82,7 +82,7 @@ const AnalysisModal = ({ visible, onClose, isConnected }) => {
                     // sample last N points
                     const points = historical.slice(-30);
                     const labels = points.map(p => p.time.split(' ')[1] || '').filter((_, i) => i % 5 === 0);
-                    const values = points.map(p => parseFloat(p.into || p.c || 0)); // 'into' is close price in some versions, 'c' in others
+                    const values = points.map(p => parseFloat(p.intc || p.c || p.into || 0)); // 'intc' is the interval close price (Noren)
 
                     if (values.length > 0 && !values.includes(NaN)) {
                         setChartData({
