@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, BORDER_RADIUS, SPACING } from '../theme/colors';
 import { getNotebooks, addNotebook, deleteNotebook, getSessions, addSession, updateSessionContent, deleteSession, getIncompleteTasksForDailyLog, getHabits } from '../db/database';
 import { formatDate } from '../utils/helpers';
+import CanvasPage from './notes/CanvasPage';
 
 export default function DailyRecords() {
     const [notebooks, setNotebooks] = useState([]);
@@ -18,6 +19,8 @@ export default function DailyRecords() {
     
     const [sessionModalVisible, setSessionModalVisible] = useState(false);
     const [newSessionName, setNewSessionName] = useState('');
+    const [pendingSessionType, setPendingSessionType] = useState('text');
+    const [typeChoiceVisible, setTypeChoiceVisible] = useState(false);
 
     const loadNotebooks = async () => {
         try {
@@ -72,26 +75,34 @@ export default function DailyRecords() {
     };
 
     // SESSION CRUD
-    const handleFabSession = async () => {
+    const handleFabSession = () => {
+        setTypeChoiceVisible(true);
+    };
+
+    const handleChooseSessionType = async (type) => {
+        setTypeChoiceVisible(false);
+
         if (activeNotebook.is_daily_log) {
-            // Auto generate daily session
+            // Auto generate/reuse the dated session for today, one per type.
             const dateStr = formatDate(new Date().toISOString().split('T')[0]);
-            
-            const existing = sessions.find(s => s.name === dateStr);
+            const name = type === 'canvas' ? `${dateStr} (Ink)` : dateStr;
+
+            const existing = sessions.find(s => s.name === name && (s.type || 'text') === type);
             if (existing) {
                 setActiveSession(existing);
                 return;
             }
 
             try {
-                const id = await addSession(activeNotebook.id, dateStr);
-                const newlyCreated = { id, notebook_id: activeNotebook.id, name: dateStr, content: '' };
+                const id = await addSession(activeNotebook.id, name, '', type);
+                const newlyCreated = { id, notebook_id: activeNotebook.id, name, content: '', type };
                 loadSessions(activeNotebook.id);
                 setActiveSession(newlyCreated);
             } catch (e) {
                 console.error(e);
             }
         } else {
+            setPendingSessionType(type);
             setNewSessionName('');
             setSessionModalVisible(true);
         }
@@ -103,8 +114,8 @@ export default function DailyRecords() {
             return;
         }
         try {
-            const id = await addSession(activeNotebook.id, newSessionName.trim());
-            const newlyCreated = { id, notebook_id: activeNotebook.id, name: newSessionName.trim(), content: '' };
+            const id = await addSession(activeNotebook.id, newSessionName.trim(), '', pendingSessionType);
+            const newlyCreated = { id, notebook_id: activeNotebook.id, name: newSessionName.trim(), content: '', type: pendingSessionType };
             setSessionModalVisible(false);
             loadSessions(activeNotebook.id);
             setActiveSession(newlyCreated);
@@ -130,23 +141,18 @@ export default function DailyRecords() {
     // ------ VIEWS ------
 
     if (activeSession) {
-        if (activeNotebook && activeNotebook.is_daily_log === 1) {
-            return <DailyLogEditor 
-                session={activeSession} 
-                onBack={() => {
-                    setActiveSession(null);
-                    loadSessions(activeNotebook.id);
-                }} 
-            />;
-        } else {
-            return <StandardEditor 
-                session={activeSession} 
-                onBack={() => {
-                    setActiveSession(null);
-                    loadSessions(activeNotebook.id);
-                }} 
-            />;
+        const closeSession = () => {
+            setActiveSession(null);
+            loadSessions(activeNotebook.id);
+        };
+
+        if (activeSession.type === 'canvas') {
+            return <CanvasPage session={activeSession} onBack={closeSession} />;
         }
+        if (activeNotebook && activeNotebook.is_daily_log === 1) {
+            return <DailyLogEditor session={activeSession} onBack={closeSession} />;
+        }
+        return <StandardEditor session={activeSession} onBack={closeSession} />;
     }
 
     if (activeNotebook) {
@@ -177,21 +183,37 @@ export default function DailyRecords() {
                                 delayLongPress={400}
                             >
                                 <View style={s.cardBody}>
-                                    <View>
-                                        <Text style={s.cardTitle}>{sess.name}</Text>
-                                        <Text style={s.cardSub} numberOfLines={2}>
-                                            {(() => {
-                                                if (!sess.content) return 'Empty note';
-                                                try {
-                                                    const parsed = JSON.parse(sess.content);
-                                                    const keys = Object.keys(parsed);
-                                                    if (keys.length === 0) return 'Empty note';
-                                                    return Object.values(parsed).join(' • ').replace(/\n/g, ' ').substring(0, 100);
-                                                } catch {
-                                                    return sess.content.substring(0, 100).replace(/\n/g, ' ');
-                                                }
-                                            })()}
-                                        </Text>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                                        {sess.type === 'canvas' && (
+                                            <Ionicons name="pencil" size={16} color={COLORS.primary} style={{ marginRight: 8 }} />
+                                        )}
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={s.cardTitle}>{sess.name}</Text>
+                                            <Text style={s.cardSub} numberOfLines={2}>
+                                                {(() => {
+                                                    if (sess.type === 'canvas') {
+                                                        try {
+                                                            const parsed = JSON.parse(sess.content || '{}');
+                                                            const strokeCount = parsed.strokes?.length ?? 0;
+                                                            const imageCount = parsed.images?.length ?? 0;
+                                                            if (!strokeCount && !imageCount) return 'Empty handwritten page';
+                                                            return `Handwritten page — ${strokeCount} strokes, ${imageCount} images`;
+                                                        } catch {
+                                                            return 'Handwritten page';
+                                                        }
+                                                    }
+                                                    if (!sess.content) return 'Empty note';
+                                                    try {
+                                                        const parsed = JSON.parse(sess.content);
+                                                        const keys = Object.keys(parsed);
+                                                        if (keys.length === 0) return 'Empty note';
+                                                        return Object.values(parsed).join(' • ').replace(/\n/g, ' ').substring(0, 100);
+                                                    } catch {
+                                                        return sess.content.substring(0, 100).replace(/\n/g, ' ');
+                                                    }
+                                                })()}
+                                            </Text>
+                                        </View>
                                     </View>
                                     <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
                                 </View>
@@ -204,16 +226,39 @@ export default function DailyRecords() {
                     <Ionicons name="add" size={28} color="#FFF" />
                 </TouchableOpacity>
 
+                {/* Note type choice */}
+                <Modal visible={typeChoiceVisible} transparent animationType="fade">
+                    <TouchableOpacity style={s.modalOverlay} onPress={() => setTypeChoiceVisible(false)} activeOpacity={1}>
+                        <View style={s.modalContent}>
+                            <Text style={s.modalTitle}>New Note</Text>
+                            <TouchableOpacity style={s.typeChoiceRow} onPress={() => handleChooseSessionType('text')}>
+                                <Ionicons name="document-text" size={22} color={COLORS.textSecondary} style={{ marginRight: 12 }} />
+                                <View style={{ flex: 1 }}>
+                                    <Text style={s.listText}>Text Note</Text>
+                                    <Text style={s.cardSub}>Bulleted sections, linked to tasks & habits</Text>
+                                </View>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={s.typeChoiceRow} onPress={() => handleChooseSessionType('canvas')}>
+                                <Ionicons name="pencil" size={22} color={COLORS.primary} style={{ marginRight: 12 }} />
+                                <View style={{ flex: 1 }}>
+                                    <Text style={s.listText}>Handwritten Page</Text>
+                                    <Text style={s.cardSub}>Write with the S Pen, drop in photos anywhere</Text>
+                                </View>
+                            </TouchableOpacity>
+                        </View>
+                    </TouchableOpacity>
+                </Modal>
+
                 {/* Session Modal */}
                 <Modal visible={sessionModalVisible} animationType="slide" transparent>
                     <View style={s.modalOverlay}>
                         <View style={s.modalContent}>
-                            <Text style={s.modalTitle}>New Note</Text>
-                            <TextInput 
-                                style={s.input} 
-                                value={newSessionName} 
-                                onChangeText={setNewSessionName} 
-                                placeholder="Name of your note..." 
+                            <Text style={s.modalTitle}>{pendingSessionType === 'canvas' ? 'New Handwritten Page' : 'New Note'}</Text>
+                            <TextInput
+                                style={s.input}
+                                value={newSessionName}
+                                onChangeText={setNewSessionName}
+                                placeholder="Name of your note..."
                                 placeholderTextColor={COLORS.textMuted}
                                 autoFocus
                                 onSubmitEditing={handleAddSession}
@@ -633,5 +678,6 @@ const s = StyleSheet.create({
     addMenuText: { fontSize: 15, fontWeight: '700', color: COLORS.textPrimary },
     modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.sm },
     listItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: COLORS.borderLight },
-    listText: { fontSize: 16, color: COLORS.textPrimary, flex: 1, fontWeight: '500' }
+    listText: { fontSize: 16, color: COLORS.textPrimary, flex: 1, fontWeight: '500' },
+    typeChoiceRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: SPACING.md, borderBottomWidth: 1, borderBottomColor: COLORS.borderLight },
 });

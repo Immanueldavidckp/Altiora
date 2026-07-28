@@ -169,12 +169,25 @@ class ShoonyaApi {
             imei: imei || 'ALT123456789'
         };
 
+        console.log('Shoonya Login Payload:', payload);
         const response = await fetch(`${this.baseUrl}QuickAuth`, {
             method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: 'jData=' + JSON.stringify(payload)
         });
 
-        const resData = await response.json();
+        const responseText = await response.text();
+        console.log('Shoonya Raw Response:', responseText.substring(0, 300));
+        
+        let resData;
+        try {
+            resData = JSON.parse(responseText);
+        } catch (e) {
+            console.error('Shoonya JSON Parse Error:', e);
+            return { success: false, message: 'Invalid response from server' };
+        }
+        
+        console.log('Shoonya Login Response:', resData);
         if (resData.stat === 'Ok') {
             this.token = resData.susertoken;
             return { success: true, data: resData };

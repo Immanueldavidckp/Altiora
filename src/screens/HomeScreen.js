@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, RefreshControl, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, RefreshControl, Dimensions, TouchableOpacity } from 'react-native';
+import { Svg, Text as TextSVG } from 'react-native-svg';
 import { COLORS, SPACING } from '../theme/colors';
 import { SectionHeader } from '../components/Card';
 import { getExpenses, getDailyRecords, getTrades } from '../db/database';
 import { format, subDays } from 'date-fns';
 import { LineChart, BarChart } from 'react-native-chart-kit';
 
-const screenWidth = Dimensions.get('window').width - (SPACING.lg * 2);
+const screenWidth = Dimensions.get('window').width - (SPACING.lg * 2) - 24;
 
 const HomeScreen = ({ navigation }) => {
     const [refreshing, setRefreshing] = useState(false);
@@ -61,6 +62,12 @@ const HomeScreen = ({ navigation }) => {
     const hour = now.getHours();
     const greeting = hour < 12 ? 'Good Morning' : hour < 17 ? 'Good Afternoon' : 'Good Evening';
 
+    const formatYLabel = (val) => {
+        const n = Number(val);
+        if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+        return `${Math.round(n)}`;
+    };
+
     const chartConfig = {
         backgroundGradientFrom: COLORS.surface,
         backgroundGradientTo: COLORS.surfaceHighlight,
@@ -70,6 +77,7 @@ const HomeScreen = ({ navigation }) => {
         barPercentage: 0.5,
         useShadowColorFromDataset: false,
         decimalPlaces: 0,
+        formatYLabel: formatYLabel,
     };
 
     const expHasData = expensesData.some(d => d > 0);
@@ -83,9 +91,9 @@ const HomeScreen = ({ navigation }) => {
                     <Text style={s.greeting}>{greeting} 👋</Text>
                     <Text style={s.date}>{format(now, 'EEEE, d MMMM')}</Text>
                 </View>
-                <View style={s.avatar}>
+                <TouchableOpacity style={s.avatar} onPress={() => navigation.navigate('Settings')}>
                     <Text style={s.avatarText}>ID</Text>
-                </View>
+                </TouchableOpacity>
             </View>
 
             <SectionHeader title="Weekly Analysis" />
@@ -105,6 +113,18 @@ const HomeScreen = ({ navigation }) => {
                         propsForDots: { r: "4", strokeWidth: "2", stroke: COLORS.primary }
                     }}
                     bezier
+                    renderDotContent={({ x, y, index }) => (
+                        <TextSVG
+                            key={index}
+                            x={x}
+                            y={y - 10}
+                            fill="white"
+                            fontSize="10"
+                            fontWeight="bold"
+                            textAnchor="middle">
+                            {productivityData[index]}
+                        </TextSVG>
+                    )}
                     style={s.chart}
                 />
             </View>
@@ -118,7 +138,9 @@ const HomeScreen = ({ navigation }) => {
                     }}
                     width={screenWidth}
                     height={220}
-                    yAxisLabel="₹"
+                    yAxisLabel=""
+                    yAxisSuffix=""
+                    showValuesOnTopOfBars={true}
                     chartConfig={{
                         ...chartConfig,
                         color: (opacity = 1) => `rgba(244, 63, 94, ${opacity})`, 
@@ -136,7 +158,20 @@ const HomeScreen = ({ navigation }) => {
                     }}
                     width={screenWidth}
                     height={220}
-                    yAxisLabel="₹"
+                    yAxisLabel=""
+                    yAxisSuffix=""
+                    renderDotContent={({ x, y, index }) => (
+                        <TextSVG
+                            key={index}
+                            x={x}
+                            y={y - 10}
+                            fill="white"
+                            fontSize="10"
+                            fontWeight="bold"
+                            textAnchor="middle">
+                            {Math.round(tradeData[index])}
+                        </TextSVG>
+                    )}
                     chartConfig={{
                         ...chartConfig,
                         color: (opacity = 1) => `rgba(16, 185, 129, ${opacity})`, 
@@ -160,8 +195,8 @@ const s = StyleSheet.create({
     avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.primary, justifyContent: 'center', alignItems: 'center' },
     avatarText: { fontSize: 16, fontWeight: '800', color: '#FFF' },
     chartTitle: { fontSize: 16, fontWeight: '700', color: COLORS.textPrimary, marginTop: SPACING.md, marginBottom: SPACING.sm },
-    chartContainer: { backgroundColor: COLORS.surface, borderRadius: 16, overflow: 'hidden', paddingVertical: SPACING.md, borderWidth: 1, borderColor: COLORS.border },
-    chart: { marginVertical: 8, borderRadius: 16, paddingRight: 30 },
+    chartContainer: { backgroundColor: COLORS.surface, borderRadius: 16, overflow: 'hidden', paddingVertical: SPACING.md, paddingLeft: 12, borderWidth: 1, borderColor: COLORS.border },
+    chart: { marginVertical: 8, borderRadius: 16, paddingRight: 12 },
 });
 
 export default HomeScreen;

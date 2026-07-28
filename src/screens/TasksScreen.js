@@ -7,10 +7,11 @@ import {
     getTasksList, addTaskItem, toggleTaskCompletion, deleteTaskItem,
     getTaskSubtasks, addTaskSubtask, toggleTaskSubtask, deleteTaskSubtask,
     getTaskDocuments, addTaskDocument, deleteTaskDocument,
-    getTaskLearnings, addTaskLearning, deleteTaskLearning,
+    getTaskLearnings, deleteTaskLearning, addTaskLearning,
     getTaskComments, addTaskComment, deleteTaskComment,
-    getTaskDailyLogs
+    getTaskDailyLogs, updateTaskCalendarIds
 } from '../db/database';
+import { syncTaskToCalendar, deleteTaskFromCalendar } from '../utils/calendar';
 
 // Helper component for inline additions
 const QuickAddInput = ({ placeholder, onAdd }) => {
@@ -254,11 +255,23 @@ export default function TasksScreen() {
     const handleCreateTask = async () => {
         if (!name.trim() || !startDate.trim()) return Alert.alert('Error', 'Name and Start Date required');
         try {
-            await addTaskItem({
+            const taskObj = {
                 name: name.trim(), start_date: startDate.trim(), end_date: endDate.trim() || null,
                 task_type: taskType, reminder_time: hasReminder ? reminderTime : null, repeat_type: hasReminder ? repeatType : null,
                 parent_task_id: parentTaskId
-            });
+            };
+            const taskId = await addTaskItem(taskObj);
+
+            // Sync to device calendar
+            try {
+                const eventId = await syncTaskToCalendar({ ...taskObj, id: taskId });
+                if (eventId) {
+                    await updateTaskCalendarIds(taskId, eventId, null);
+                }
+            } catch (calErr) {
+                console.error('[Calendar] Error syncing created task:', calErr);
+            }
+
             setModalVisible(false);
             resetForm();
             loadTasks();
@@ -268,6 +281,27 @@ export default function TasksScreen() {
 
     const handleToggleTask = async (task) => {
         await toggleTaskCompletion(task.id, task.is_completed);
+        
+        // Sync updated state to calendar
+        try {
+            const updatedTask = {
+                ...task,
+                is_completed: task.is_completed ? 0 : 1
+            };
+            if (updatedTask.calendar_event_id) {
+                const updatedName = updatedTask.is_completed 
+                    ? `✓ [Completed] ${updatedTask.name}` 
+                    : updatedTask.name.replace(/^✓ \[Completed\] /, '');
+                
+                await syncTaskToCalendar({
+                    ...updatedTask,
+                    name: updatedName
+                });
+            }
+        } catch (calErr) {
+            console.error('[Calendar] Error updating completion status in calendar:', calErr);
+        }
+
         loadTasks();
         if (activeTask && activeTask.id === task.id) {
             const newStack = [...taskStack];
@@ -300,6 +334,9 @@ export default function TasksScreen() {
                             { text: 'Cancel', style: 'cancel' },
                             { text: 'Delete', style: 'destructive', onPress: async () => {
                                 await deleteTaskItem(t.id, t.linked_habit_id);
+                                if (t.calendar_event_id) {
+                                    await deleteTaskFromCalendar(t.calendar_event_id);
+                                }
                                 const newStack = [...taskStack];
                                 newStack.pop();
                                 setTaskStack(newStack);
@@ -317,7 +354,16 @@ export default function TasksScreen() {
                 ) : (
                     tasks.map(t => (
                         <TouchableOpacity key={t.id} style={[s.card, t.is_completed && s.cardCompleted]} onPress={() => setTaskStack([t])} onLongPress={() => {
-                            Alert.alert('Delete', 'Delete task?', [{text:'Cancel',style:'cancel'}, {text:'Delete',style:'destructive',onPress:async()=>{await deleteTaskItem(t.id, t.linked_habit_id); loadTasks();}}]);
+                            Alert.alert('Delete', 'Delete task?', [
+                                {text:'Cancel',style:'cancel'}, 
+                                {text:'Delete',style:'destructive',onPress:async()=>{
+                                    await deleteTaskItem(t.id, t.linked_habit_id); 
+                                    if (t.calendar_event_id) {
+                                        await deleteTaskFromCalendar(t.calendar_event_id);
+                                    }
+                                    loadTasks();
+                                }}
+                            ]);
                         }}>
                             <View style={s.cardBody}>
                                 <TouchableOpacity style={s.checkboxContainer} onPress={() => handleToggleTask(t)}>

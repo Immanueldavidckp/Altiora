@@ -1,0 +1,21 @@
+{
+  "name": "altiora-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP server exposing the Altiora (Offline Tasker) SQLite data to Claude Code",
+  "main": "server.js",
+  "bin": {
+    "altiora-mcp": "server.js"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "inspect": "npx -y @modelcontextprotocol/inspector node server.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0"
+  }
+}

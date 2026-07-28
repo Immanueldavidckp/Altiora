@@ -40,9 +40,8 @@ yarn-error.*
 /ios
 /android
 
-# Allow the releases folder even if it contains large files
-!/releases/
-!/releases/*.apk
+# APK binaries (too large for GitHub, keep locally / use Releases instead)
+*.apk
 
 # logs and generic files
 *.log

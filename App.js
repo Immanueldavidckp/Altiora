@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 
 import HomeScreen from './src/screens/HomeScreen';
@@ -10,8 +12,10 @@ import ExpenseTracker from './src/screens/ExpenseTracker';
 import DailyRecords from './src/screens/DailyRecords';
 import TasksScreen from './src/screens/TasksScreen';
 import TradingTracker from './src/screens/TradingTracker';
+import StockDetailScreen from './src/screens/StockDetailScreen';
 import HabitTracker from './src/screens/HabitTracker';
 import AppUsageTracker from './src/screens/AppUsageTracker';
+import SettingsScreen from './src/screens/SettingsScreen';
 import { getDatabase } from './src/db/database';
 
 const COLORS = {
@@ -25,6 +29,56 @@ const COLORS = {
 };
 
 const Tab = createBottomTabNavigator();
+const TradingStack = createNativeStackNavigator();
+const HomeStack = createNativeStackNavigator();
+
+const HomeStackScreen = () => (
+  <HomeStack.Navigator
+    screenOptions={{
+      headerStyle: { backgroundColor: COLORS.background },
+      headerTintColor: COLORS.textPrimary,
+      headerTitleStyle: { fontWeight: '800', fontSize: 18 },
+      headerShadowVisible: false,
+      headerBackTitle: 'Back'
+    }}
+  >
+    <HomeStack.Screen 
+      name="HomeMain" 
+      component={HomeScreen} 
+      options={{ headerShown: false }} 
+    />
+    <HomeStack.Screen 
+      name="Settings" 
+      component={SettingsScreen} 
+      options={{ title: 'Settings' }} 
+    />
+  </HomeStack.Navigator>
+);
+
+const TradingStackScreen = () => (
+  <TradingStack.Navigator
+    screenOptions={{
+      headerStyle: { backgroundColor: COLORS.background },
+      headerTintColor: COLORS.textPrimary,
+      headerTitleStyle: { fontWeight: '800', fontSize: 18 },
+      headerShadowVisible: false,
+    }}
+  >
+    <TradingStack.Screen
+      name="TradingMain"
+      component={TradingTracker}
+      options={{ headerShown: false }}
+    />
+    <TradingStack.Screen
+      name="StockDetail"
+      component={StockDetailScreen}
+      options={({ route }) => ({
+        title: route.params?.symbol || 'Stock Details',
+        headerBackTitle: 'Back',
+      })}
+    />
+  </TradingStack.Navigator>
+);
 
 const getTabIcon = (routeName, focused) => {
   const icons = {
@@ -57,15 +111,18 @@ export default function App() {
 
   if (!dbReady) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={COLORS.primary} />
-        <Text style={styles.loadingText}>Initializing...</Text>
-        <StatusBar style="light" />
-      </View>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={COLORS.primary} />
+          <Text style={styles.loadingText}>Initializing...</Text>
+          <StatusBar style="light" />
+        </View>
+      </GestureHandlerRootView>
     );
   }
 
   return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
     <NavigationContainer>
       <StatusBar style="light" />
       <Tab.Navigator
@@ -103,15 +160,16 @@ export default function App() {
           headerTintColor: COLORS.textPrimary,
         })}
       >
-        <Tab.Screen name="Home" component={HomeScreen} options={{ title: '🏠 Home' }} />
+        <Tab.Screen name="Home" component={HomeStackScreen} options={{ title: '🏠 Home' }} />
         <Tab.Screen name="Expenses" component={ExpenseTracker} options={{ title: '💰 Expenses' }} />
         <Tab.Screen name="Daily" component={DailyRecords} options={{ title: '📋 Daily' }} />
         <Tab.Screen name="Tasks" component={TasksScreen} options={{ title: '☑️ Tasks' }} />
-        <Tab.Screen name="Trading" component={TradingTracker} options={{ title: '📈 Trading' }} />
+        <Tab.Screen name="Trading" component={TradingStackScreen} options={{ title: '📈 Trading', headerShown: false }} />
         <Tab.Screen name="Habits" component={HabitTracker} options={{ title: '✅ Habits' }} />
         <Tab.Screen name="Usage" component={AppUsageTracker} options={{ title: '📱 Apps' }} />
       </Tab.Navigator>
     </NavigationContainer>
+    </GestureHandlerRootView>
   );
 }
 

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "altiora": {
+      "type": "stdio",
+      "command": "sh",
+      "args": [
+        "-c",
+        "exec node \"${CLAUDE_PROJECT_DIR:-.}/mcp/server.js\""
+      ]
+    }
+  }
+}

@@ -1,13 +1,18 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import {
     View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput,
-    Modal, Alert, RefreshControl
+    Modal, Alert, RefreshControl, ActivityIndicator
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, BORDER_RADIUS, SPACING } from '../theme/colors';
 import { Card, StatCard, EmptyState, SectionHeader } from '../components/Card';
 import { getTodayKey, getRelativeDate, formatDate, formatDateKey } from '../utils/helpers';
-import { addAppUsage, getAppUsage, deleteAppUsage } from '../db/database';
+import { addAppUsage, getAppUsage, deleteAppUsage, clearAppUsageByDate } from '../db/database';
+import {
+    checkUsagePermission,
+    requestUsagePermission,
+    getAutoAppUsage,
+} from '../utils/appUsageReader';
 
 const COMMON_APPS = [
     { name: 'WhatsApp', color: '#25D366', icon: 'logo-whatsapp' },
@@ -25,6 +30,7 @@ const AppUsageTracker = () => {
     const [showModal, setShowModal] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
     const [selectedDate, setSelectedDate] = useState(getTodayKey());
+    const [isSyncing, setIsSyncing] = useState(false);
 
     // Form state
     const [appName, setAppName] = useState('');
@@ -46,6 +52,63 @@ const AppUsageTracker = () => {
         setRefreshing(true);
         await loadData();
         setRefreshing(false);
+    };
+
+    const handleAutoSync = async () => {
+        const hasPermission = await checkUsagePermission();
+        if (!hasPermission) {
+            Alert.alert(
+                'Permission Required',
+                'Altiora needs "Usage Access" permission to automatically detect your app usage. Please enable it in the settings page that opens.',
+                [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Open Settings', onPress: () => requestUsagePermission() }
+                ]
+            );
+            return;
+        }
+
+        Alert.alert(
+            'Sync Usage',
+            `This will fetch system app usage for ${getRelativeDate(selectedDate)}. Existing entries for this date will be replaced.`,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Sync Now',
+                    onPress: async () => {
+                        setIsSyncing(true);
+                        try {
+                            const stats = await getAutoAppUsage(selectedDate);
+                            
+                            if (stats.error === 'PERMISSION_REQUIRED') {
+                                requestUsagePermission();
+                            } else if (stats.length > 0) {
+                                // Clear existing for this date
+                                await clearAppUsageByDate(selectedDate);
+                                
+                                // Add new entries
+                                for (const app of stats) {
+                                    await addAppUsage({
+                                        app_name: app.appName,
+                                        hours_used: parseFloat(app.totalHours.toFixed(2)),
+                                        time_used_at: 'System Sync',
+                                        date: selectedDate,
+                                    });
+                                }
+                                loadData();
+                                Alert.alert('Success', `Synced usage for ${stats.length} apps.`);
+                            } else {
+                                Alert.alert('Check', 'No significant usage found for this date.');
+                            }
+                        } catch (err) {
+                            Alert.alert('Error', 'Failed to sync usage stats');
+                        } finally {
+                            setIsSyncing(false);
+                        }
+                    }
+                }
+            ]
+        );
     };
 
     const handleSubmit = async () => {
@@ -112,9 +175,20 @@ const AppUsageTracker = () => {
                         <Text style={styles.summaryLabel}>Total Screen Time</Text>
                         <Text style={styles.summaryValue}>{totalHours.toFixed(1)}h</Text>
                     </View>
-                    <View style={[styles.iconBox, { backgroundColor: COLORS.primary + '20' }]}>
-                        <Ionicons name="phone-portrait-outline" size={32} color={COLORS.primary} />
-                    </View>
+                    <TouchableOpacity 
+                        style={[styles.syncBtn, { backgroundColor: COLORS.accent + '20' }]} 
+                        onPress={handleAutoSync}
+                        disabled={isSyncing}
+                    >
+                        {isSyncing ? (
+                            <ActivityIndicator size="small" color={COLORS.accent} />
+                        ) : (
+                            <>
+                                <Ionicons name="refresh-circle" size={28} color={COLORS.accent} />
+                                <Text style={styles.syncText}>Auto Sync</Text>
+                            </>
+                        )}
+                    </TouchableOpacity>
                 </View>
                 <View style={styles.progressBarBg}>
                     <View style={[styles.progressBarFill, { width: `${Math.min(100, (totalHours / 12) * 100)}%`, backgroundColor: totalHours > 6 ? COLORS.accentRed : COLORS.accentGreen }]} />
@@ -129,7 +203,7 @@ const AppUsageTracker = () => {
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
             >
                 {usage.length === 0 ? (
-                    <EmptyState title="No usage logged" subtitle="Tap + to record your app usage" emoji="📱" />
+                    <EmptyState title="No usage logged" subtitle="Tap + to manually record OR tap Auto Sync to detect usage" emoji="📱" />
                 ) : (
                     usage.map((item) => {
                         const commonApp = COMMON_APPS.find(a => a.name.toLowerCase() === item.app_name.toLowerCase());
@@ -141,7 +215,7 @@ const AppUsageTracker = () => {
                                     </View>
                                     <View style={styles.usageInfo}>
                                         <Text style={styles.appName}>{item.app_name}</Text>
-                                        <Text style={styles.usageTime}>Used at: {item.time_used_at}</Text>
+                                        <Text style={styles.usageTime}>{item.time_used_at === 'System Sync' ? 'Detected automatically' : `Used at: ${item.time_used_at}`}</Text>
                                     </View>
                                     <View style={styles.usageHoursBox}>
                                         <Text style={[styles.usageHours, { color: commonApp?.color || COLORS.primary }]}>{item.hours_used}h</Text>
@@ -246,7 +320,13 @@ const styles = StyleSheet.create({
     summaryHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
     summaryLabel: { fontSize: 12, color: COLORS.textSecondary, fontWeight: '600' },
     summaryValue: { fontSize: 32, fontWeight: '900', color: COLORS.textPrimary, marginVertical: 4 },
-    iconBox: { width: 56, height: 56, borderRadius: BORDER_RADIUS.md, justifyContent: 'center', alignItems: 'center' },
+    syncBtn: {
+        flexDirection: 'row', alignItems: 'center', gap: 6,
+        paddingHorizontal: SPACING.md, paddingVertical: 6,
+        borderRadius: BORDER_RADIUS.md,
+    },
+    syncText: { fontSize: 12, fontWeight: '700', color: COLORS.accent },
+    iconBox: { width: 44, height: 44, borderRadius: BORDER_RADIUS.md, justifyContent: 'center', alignItems: 'center' },
     progressBarBg: { height: 8, backgroundColor: COLORS.surfaceHighlight, borderRadius: 4, marginVertical: SPACING.md, overflow: 'hidden' },
     progressBarFill: { height: '100%', borderRadius: 4 },
     summarySub: { fontSize: 13, color: COLORS.textSecondary, fontWeight: '500' },

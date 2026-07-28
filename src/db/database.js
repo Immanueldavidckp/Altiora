@@ -1,28 +1,71 @@
 import * as SQLite from 'expo-sqlite';
 
-let dbPromise = null;
+let dbInstance = null;
+let dbStarting = false;
 
 export const getDatabase = async () => {
-    if (dbPromise) return dbPromise;
-    dbPromise = (async () => {
-        try {
-            const database = await SQLite.openDatabaseAsync('offline_tasker.db');
-            await initializeDatabase(database);
-            return database;
-        } catch (e) {
-            dbPromise = null;
-            throw e;
+    if (dbInstance) return dbInstance;
+    if (dbStarting) {
+        // Wait for current initialization
+        while (dbStarting) {
+            await new Promise(resolve => setTimeout(resolve, 50));
         }
-    })();
-    return dbPromise;
+        if (dbInstance) return dbInstance;
+    }
+    
+    dbStarting = true;
+    try {
+        console.log('[DB] Opening database...');
+        const database = await SQLite.openDatabaseAsync('offline_tasker.db');
+
+        // Sanitize `undefined` to `null` to prevent SQLite errors in Hermes/release mode
+        const sanitizeArg = (arg) => {
+            if (arg === undefined) return null;
+            if (Array.isArray(arg)) return arg.map(item => item === undefined ? null : item);
+            if (arg !== null && typeof arg === 'object') {
+                const newObj = {};
+                for (const key in arg) {
+                    newObj[key] = arg[key] === undefined ? null : arg[key];
+                }
+                return newObj;
+            }
+            return arg;
+        };
+
+        const originalRunAsync = database.runAsync.bind(database);
+        database.runAsync = async (query, ...args) => {
+            return await originalRunAsync(query, ...args.map(sanitizeArg));
+        };
+
+        const originalGetAllAsync = database.getAllAsync.bind(database);
+        database.getAllAsync = async (query, ...args) => {
+            return await originalGetAllAsync(query, ...args.map(sanitizeArg));
+        };
+
+        const originalGetFirstAsync = database.getFirstAsync.bind(database);
+        database.getFirstAsync = async (query, ...args) => {
+            return await originalGetFirstAsync(query, ...args.map(sanitizeArg));
+        };
+
+        console.log('[DB] Database opened, initializing schema...');
+        await initializeDatabase(database);
+        dbInstance = database;
+        console.log('[DB] Database ready.');
+        return database;
+    } catch (e) {
+        console.error('[DB] Database open error:', e);
+        throw e;
+    } finally {
+        dbStarting = false;
+    }
 };
 
 const initializeDatabase = async (database) => {
     try {
+        await database.runAsync('PRAGMA journal_mode = WAL;');
+        await database.runAsync('PRAGMA foreign_keys = ON;');
+        
         await database.execAsync(`
-    PRAGMA journal_mode = WAL;
-    PRAGMA foreign_keys = ON;
-
     CREATE TABLE IF NOT EXISTS expenses (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       amount REAL NOT NULL,
@@ -34,6 +77,7 @@ const initializeDatabase = async (database) => {
       latitude REAL,
       longitude REAL,
       location_name TEXT,
+      time TEXT,
       created_at TEXT DEFAULT (datetime('now','localtime'))
     );
 
@@ -141,6 +185,8 @@ const initializeDatabase = async (database) => {
       repeat_type TEXT,
       linked_habit_id INTEGER,
       is_completed INTEGER DEFAULT 0,
+      calendar_event_id TEXT DEFAULT NULL,
+      reminder_id TEXT DEFAULT NULL,
       created_at TEXT DEFAULT (datetime('now','localtime'))
     );
 
@@ -207,76 +253,142 @@ const initializeDatabase = async (database) => {
         console.warn('execAsync schema init failed softly:', e);
     }
 
-  const taskCols = await database.getAllAsync("PRAGMA table_info(tasks)");
-  if (!taskCols.some(c => c.name === 'parent_task_id')) {
-      await database.runAsync('ALTER TABLE tasks ADD COLUMN parent_task_id INTEGER DEFAULT NULL;');
-  }
+    // Individual migrations with independent try-catch
+    // These handle upgrading old databases that are missing newer columns
+    const migrations = [
+        ["ALTER TABLE tasks ADD COLUMN parent_task_id INTEGER DEFAULT NULL;", "tasks parent_task_id"],
+        ["ALTER TABLE expenses ADD COLUMN latitude REAL DEFAULT NULL;", "expenses latitude"],
+        ["ALTER TABLE expenses ADD COLUMN longitude REAL DEFAULT NULL;", "expenses longitude"],
+        ["ALTER TABLE expenses ADD COLUMN location_name TEXT DEFAULT NULL;", "expenses location_name"],
+        ["ALTER TABLE expenses ADD COLUMN time TEXT DEFAULT NULL;", "expenses time"],
+        ["ALTER TABLE expenses ADD COLUMN consumer_type TEXT DEFAULT 'myself';", "expenses consumer_type"],
+        ["ALTER TABLE expenses ADD COLUMN consumer_data TEXT DEFAULT NULL;", "expenses consumer_data"],
+        ["ALTER TABLE tasks ADD COLUMN calendar_event_id TEXT DEFAULT NULL;", "tasks calendar_event_id"],
+        ["ALTER TABLE tasks ADD COLUMN reminder_id TEXT DEFAULT NULL;", "tasks reminder_id"],
+        ["ALTER TABLE notebook_sessions ADD COLUMN type TEXT DEFAULT 'text';", "notebook_sessions type"],
+    ];
 
-  // Cleanup duplicates from daily logs (keep latest non-empty or max id)
-  try {
-      await database.runAsync(`
-          DELETE FROM notebook_sessions 
-          WHERE (content IS NULL OR content = '' OR content = '{}')
-          AND id IN (
-              SELECT n1.id 
-              FROM notebook_sessions n1
-              JOIN notebook_sessions n2 
-              ON n1.notebook_id = n2.notebook_id AND n1.name = n2.name
-              WHERE n1.id > n2.id OR (n2.content IS NOT NULL AND n2.content != '' AND n2.content != '{}')
-          );
-      `);
-  } catch (e) {
-      console.warn('Duplicate cleanup failed:', e);
-  }
+    for (const [sql, label] of migrations) {
+        try {
+            await database.runAsync(sql);
+            console.log(`[DB] Migration success: ${label}`);
+        } catch (e) {
+            // Ignore "duplicate column" errors
+            const msg = e?.message || "";
+            if (!msg.includes('duplicate column') && !msg.includes('already exists')) {
+                console.warn(`[DB] Migration check for ${label}:`, msg);
+            }
+        }
+    }
 
-  // Create inter_transfers table if needed
-  try {
-      await database.runAsync(`
-          CREATE TABLE IF NOT EXISTS inter_transfers (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              amount REAL NOT NULL,
-              from_account TEXT NOT NULL,
-              to_account TEXT NOT NULL,
-              reason TEXT,
-              date TEXT NOT NULL,
-              time TEXT NOT NULL,
-              created_at TEXT DEFAULT (datetime('now','localtime'))
-          );
-      `);
-  } catch (e) {
-      console.warn('inter_transfers table creation failed:', e);
-  }
+    // Create receivables table
+    try {
+        await database.runAsync(`
+            CREATE TABLE IF NOT EXISTS receivables (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                expense_id INTEGER,
+                consumer_type TEXT NOT NULL,
+                person_name TEXT,
+                amount REAL NOT NULL,
+                description TEXT,
+                date TEXT NOT NULL,
+                is_settled INTEGER DEFAULT 0,
+                settled_at TEXT,
+                created_at TEXT DEFAULT (datetime('now','localtime'))
+            );
+        `);
+    } catch (e) {
+        console.warn('receivables table creation failed:', e);
+    }
 
-  // Add time column to expenses if missing
-  try {
-      const expCols = await database.getAllAsync("PRAGMA table_info(expenses)");
-      if (!expCols.some(c => c.name === 'time')) {
-          await database.runAsync("ALTER TABLE expenses ADD COLUMN time TEXT DEFAULT NULL;");
-      }
-  } catch (e) {
-      console.warn('expenses time column migration failed:', e);
-  }
+    // Cleanup duplicates from daily logs (keep latest non-empty or max id)
+    try {
+        await database.runAsync(`
+            DELETE FROM notebook_sessions 
+            WHERE (content IS NULL OR content = '' OR content = '{}')
+            AND id IN (
+                SELECT n1.id 
+                FROM notebook_sessions n1
+                JOIN notebook_sessions n2 
+                ON n1.notebook_id = n2.notebook_id AND n1.name = n2.name
+                WHERE n1.id > n2.id OR (n2.content IS NOT NULL AND n2.content != '' AND n2.content != '{}')
+            );
+        `);
+    } catch (e) {
+        console.warn('Duplicate cleanup failed:', e);
+    }
+
+    // Create inter_transfers table if needed
+    try {
+        await database.runAsync(`
+            CREATE TABLE IF NOT EXISTS inter_transfers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                amount REAL NOT NULL,
+                from_account TEXT NOT NULL,
+                to_account TEXT NOT NULL,
+                reason TEXT,
+                date TEXT NOT NULL,
+                time TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now','localtime'))
+            );
+        `);
+    } catch (e) {
+        console.warn('inter_transfers table creation failed:', e);
+    }
 };
 
 // ============= EXPENSES =============
 export const addExpense = async (expense) => {
     const db = await getDatabase();
     const result = await db.runAsync(
-        'INSERT INTO expenses (amount, description, category, payment_method, type, date, time, latitude, longitude, location_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO expenses (amount, description, category, payment_method, type, date, time, latitude, longitude, location_name, consumer_type, consumer_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [
             expense.amount,
-            expense.description,
-            expense.category,
+            expense.description ?? '',
+            expense.category ?? '',
             expense.payment_method,
-            expense.type || 'expense',
+            expense.type ?? 'expense',
             expense.date,
-            expense.time || null,
-            expense.latitude || null,
-            expense.longitude || null,
-            expense.location_name || null
+            expense.time ?? null,
+            expense.latitude ?? null,
+            expense.longitude ?? null,
+            expense.location_name ?? null,
+            expense.consumer_type ?? 'myself',
+            expense.consumer_data ? JSON.stringify(expense.consumer_data) : null,
         ]
     );
     return result.lastInsertRowId;
+};
+
+// ============= RECEIVABLES =============
+export const addReceivable = async (rec) => {
+    const db = await getDatabase();
+    const result = await db.runAsync(
+        'INSERT INTO receivables (expense_id, consumer_type, person_name, amount, description, date) VALUES (?, ?, ?, ?, ?, ?)',
+        [rec.expense_id ?? null, rec.consumer_type, rec.person_name ?? null, rec.amount, rec.description ?? '', rec.date]
+    );
+    return result.lastInsertRowId;
+};
+
+export const getReceivables = async (settled = false) => {
+    const db = await getDatabase();
+    return await db.getAllAsync(
+        'SELECT * FROM receivables WHERE is_settled = ? ORDER BY created_at DESC',
+        [settled ? 1 : 0]
+    );
+};
+
+export const settleReceivable = async (id) => {
+    const db = await getDatabase();
+    await db.runAsync(
+        "UPDATE receivables SET is_settled = 1, settled_at = datetime('now','localtime') WHERE id = ?",
+        [id]
+    );
+};
+
+export const deleteReceivable = async (id) => {
+    const db = await getDatabase();
+    await db.runAsync('DELETE FROM receivables WHERE id = ?', [id]);
 };
 
 export const addTransfer = async (transfer) => {
@@ -503,6 +615,11 @@ export const deleteAppUsage = async (id) => {
     await db.runAsync('DELETE FROM app_usage WHERE id = ?', [id]);
 };
 
+export const clearAppUsageByDate = async (date) => {
+    const db = await getDatabase();
+    await db.runAsync('DELETE FROM app_usage WHERE date = ?', [date]);
+};
+
 // ============= ADVANCED HABITS =============
 export const addAdvHabit = async (habit) => {
     const db = await getDatabase();
@@ -561,11 +678,11 @@ export const getSessions = async (notebookId) => {
     return await db.getAllAsync('SELECT * FROM notebook_sessions WHERE notebook_id = ? ORDER BY created_at DESC', [notebookId]);
 };
 
-export const addSession = async (notebookId, name, content = '') => {
+export const addSession = async (notebookId, name, content = '', type = 'text') => {
     const db = await getDatabase();
     const result = await db.runAsync(
-        'INSERT INTO notebook_sessions (notebook_id, name, content) VALUES (?, ?, ?)',
-        [notebookId, name, content]
+        'INSERT INTO notebook_sessions (notebook_id, name, content, type) VALUES (?, ?, ?, ?)',
+        [notebookId, name, content, type]
     );
     return result.lastInsertRowId;
 };
@@ -584,6 +701,11 @@ export const deleteSession = async (id) => {
 export const getTasksList = async () => {
     const db = await getDatabase();
     return await db.getAllAsync('SELECT * FROM tasks WHERE parent_task_id IS NULL ORDER BY start_date DESC, created_at DESC');
+};
+
+export const getUnsyncedTasks = async () => {
+    const db = await getDatabase();
+    return await db.getAllAsync('SELECT * FROM tasks WHERE calendar_event_id IS NULL AND parent_task_id IS NULL');
 };
 
 export const addTaskItem = async (task) => {
@@ -624,6 +746,11 @@ export const addTaskItem = async (task) => {
 export const toggleTaskCompletion = async (id, currentStatus) => {
     const db = await getDatabase();
     await db.runAsync('UPDATE tasks SET is_completed = ? WHERE id = ?', [currentStatus ? 0 : 1, id]);
+};
+
+export const updateTaskCalendarIds = async (id, calendarEventId, reminderId) => {
+    const db = await getDatabase();
+    await db.runAsync('UPDATE tasks SET calendar_event_id = ?, reminder_id = ? WHERE id = ?', [calendarEventId, reminderId, id]);
 };
 
 export const deleteTaskItem = async (id, linkedHabitId) => {
@@ -771,4 +898,129 @@ export const getTradingPresets = async () => {
 export const deleteTradingPreset = async (id) => {
     const db = await getDatabase();
     await db.runAsync('DELETE FROM trading_presets WHERE id = ?', [id]);
+};
+
+// ============= WATCHLISTS =============
+export const initWatchlistTables = async () => {
+    const db = await getDatabase();
+    try {
+        await db.execAsync(`
+            CREATE TABLE IF NOT EXISTS watchlists (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                sort_order INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now','localtime'))
+            );
+            CREATE TABLE IF NOT EXISTS watchlist_stocks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                watchlist_id INTEGER NOT NULL,
+                symbol TEXT NOT NULL,
+                exchange TEXT DEFAULT 'NSE',
+                token TEXT,
+                company_name TEXT,
+                created_at TEXT DEFAULT (datetime('now','localtime')),
+                FOREIGN KEY (watchlist_id) REFERENCES watchlists(id) ON DELETE CASCADE,
+                UNIQUE(watchlist_id, symbol, exchange)
+            );
+        `);
+    } catch (e) {
+        console.warn('[DB] Watchlist tables init:', e?.message);
+    }
+};
+
+export const getWatchlists = async () => {
+    const db = await getDatabase();
+    await initWatchlistTables();
+    return await db.getAllAsync('SELECT * FROM watchlists ORDER BY sort_order, id');
+};
+
+export const addWatchlist = async (name) => {
+    const db = await getDatabase();
+    await initWatchlistTables();
+    const result = await db.runAsync('INSERT INTO watchlists (name) VALUES (?)', [name]);
+    return result.lastInsertRowId;
+};
+
+export const deleteWatchlist = async (id) => {
+    const db = await getDatabase();
+    await db.runAsync('DELETE FROM watchlists WHERE id = ?', [id]);
+};
+
+export const getWatchlistStocks = async (watchlistId) => {
+    const db = await getDatabase();
+    await initWatchlistTables();
+    return await db.getAllAsync('SELECT * FROM watchlist_stocks WHERE watchlist_id = ? ORDER BY id', [watchlistId]);
+};
+
+export const addWatchlistStock = async (watchlistId, stock) => {
+    const db = await getDatabase();
+    await initWatchlistTables();
+    try {
+        const result = await db.runAsync(
+            'INSERT INTO watchlist_stocks (watchlist_id, symbol, exchange, token, company_name) VALUES (?, ?, ?, ?, ?)',
+            [watchlistId, stock.symbol, stock.exchange || 'NSE', stock.token || '', stock.company_name || '']
+        );
+        return result.lastInsertRowId;
+    } catch (e) {
+        // Duplicate entry
+        console.warn('Stock already in watchlist');
+        return null;
+    }
+};
+
+export const removeWatchlistStock = async (id) => {
+    const db = await getDatabase();
+    await db.runAsync('DELETE FROM watchlist_stocks WHERE id = ?', [id]);
+};
+// ============= BACKUP & RESTORE =============
+
+export const getAllDataForBackup = async () => {
+    const db = await getDatabase();
+    const tables = [
+        'expenses', 'daily_records', 'trading', 'habits', 'habit_checks', 
+        'app_usage', 'adv_habits', 'adv_habit_checks', 'notebooks', 
+        'notebook_sessions', 'tasks', 'task_documents', 'task_learnings', 
+        'task_comments', 'shoonya_config', 'trading_presets', 'inter_transfers'
+    ];
+    
+    const backup = {};
+    for (const table of tables) {
+        try {
+            backup[table] = await db.getAllAsync(`SELECT * FROM ${table}`);
+        } catch (e) {
+            console.warn(`Backup failed for table ${table}:`, e);
+            backup[table] = [];
+        }
+    }
+    return backup;
+};
+
+export const restoreDataFromBackup = async (backup) => {
+    const db = await getDatabase();
+    // Use a transaction for safety
+    await db.execAsync('BEGIN TRANSACTION');
+    try {
+        const tables = Object.keys(backup);
+        for (const table of tables) {
+            // Delete existing data
+            await db.runAsync(`DELETE FROM ${table}`);
+            const rows = backup[table];
+            if (!rows || rows.length === 0) continue;
+            
+            const columns = Object.keys(rows[0]);
+            const placeholders = columns.map(() => '?').join(',');
+            const sql = `INSERT INTO ${table} (${columns.join(',')}) VALUES (${placeholders})`;
+            
+            for (const row of rows) {
+                const values = columns.map(col => row[col]);
+                await db.runAsync(sql, values);
+            }
+        }
+        await db.execAsync('COMMIT');
+        return { success: true };
+    } catch (e) {
+        await db.execAsync('ROLLBACK');
+        console.error('Restore failed:', e);
+        return { success: false, error: e.message };
+    }
 };

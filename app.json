@@ -21,13 +21,28 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "package": "com.offlinetasker.app"
+      "package": "com.offlinetasker.app",
+      "versionCode": 3
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-sqlite"
+      "expo-sqlite",
+      "expo-sharing",
+      [
+        "expo-calendar",
+        {
+          "calendarPermission": "Allow Altiora to sync tasks to your calendar.",
+          "remindersPermission": "Allow Altiora to sync tasks to your reminders."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Altiora to access your photos to insert them into handwritten notes."
+        }
+      ]
     ]
   }
 }
